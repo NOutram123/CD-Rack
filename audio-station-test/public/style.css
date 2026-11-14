@@ -1,0 +1,110 @@
+:root { color-scheme:dark; font-family:Inter,system-ui,sans-serif; color:#f3eddf; background:#171914; --surface:#252720; --muted:#bcb7a6; --border:#494c3e; --gold:#e8bb76; }
+.demo-entry { margin-top:20px;padding-top:16px;border-top:1px solid var(--border); }
+#demo-banner,#empty-library { color:var(--muted);font-size:13px;text-align:center;padding:8px 16px;margin:0; }
+#exit-demo { margin-top:12px; }
+* { box-sizing:border-box; }
+body { margin:0; }
+main { width:100%; margin:0 auto; }
+button,input,select { font:inherit; }
+button { color:inherit; border:1px solid var(--border); background:#30332b; border-radius:5px; padding:9px 14px; cursor:pointer; }
+button:hover { background:#41453a; }
+button:disabled { opacity:.4; cursor:default; }
+button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+.primary { background:var(--gold); border-color:var(--gold); color:#282519; }
+.primary:hover { background:#f5cc8b; }
+h1 { font-size:27px; letter-spacing:-.5px; font-weight:500; margin:0 0 18px; }
+h2 { font-size:18px; font-weight:500; margin:0 0 12px; }
+p { margin:12px 0; line-height:1.5; }
+.connection { width:min(100% - 36px,450px); margin:10vh auto 40px; padding:25px; border:1px solid var(--border); background:var(--surface); border-radius:10px; }
+label { display:block; margin:18px 0 7px; font-size:13px; }
+input,select { width:100%; min-width:0; padding:11px; border:1px solid var(--border); border-radius:5px; color:inherit; background:#191c17; }
+.address-row { display:flex; gap:8px; }
+.address-row button { flex:none; }
+.help { color:var(--muted); font-size:12px; }
+.actions { display:flex; gap:8px; flex-wrap:wrap; }
+.error { color:#ffb1a0; }
+#deck { container-type:size; width:100%; height:max(330px,25vw); min-height:330px; position:relative; background:linear-gradient(#28271f,#181a15); border-top:8px solid #4d4837; border-bottom:11px solid #5a513b; padding:4px 5px; isolation:isolate; }
+#rack { height:100%; display:flex; gap:2px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; padding:4px; box-shadow:inset 0 3px 10px #000d; background:#11130f; touch-action:pan-x; overscroll-behavior-x:contain; user-select:none; }
+#rack::-webkit-scrollbar { display:none; }
+.spine { position:relative; flex:0 0 clamp(26px,2.2vw,42px); padding:8px 2px; border:1px solid #ffffff40; border-radius:2px; display:flex; flex-direction:column; align-items:center; gap:9px; color:var(--letter); background:linear-gradient(90deg,#0005,transparent 23%,#ffffff16 78%,#0005),var(--jacket); box-shadow:inset 0 2px 2px #fff5,0 3px 5px #0009; }
+.spine:hover,.spine[aria-pressed="true"] { background:linear-gradient(90deg,#0002,transparent,#ffffff30),var(--jacket); box-shadow:inset 0 0 0 2px var(--jacket-accent); }
+.spine strong { writing-mode:vertical-rl; font-weight:500; letter-spacing:.03em; font-size:13px; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:0; }
+.spine i { flex:none; width:12px; height:12px; border:3px double currentColor; border-radius:50%; background:var(--jacket-accent); }
+.spine.live i { border-style:solid; background:#282519; }
+#album { position:absolute; top:4px; z-index:2; width:min(calc(100% - 18px),calc(100cqh - 50px)); padding:0; border:1px solid #aaa38a; border-radius:4px; background:#23261f; box-shadow:0 6px 30px #000d; }
+#cover { display:block; width:100%; aspect-ratio:1; padding:0; border:0; border-radius:3px 3px 0 0; background:transparent; }
+#art { display:block; width:100%; height:auto; border-radius:3px 3px 0 0; }
+#transport-row { height:36px; display:flex; gap:5px; align-items:center; padding:2px 3px 2px 8px; }
+#track { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:#eee9da; }
+#controls { display:flex; gap:3px; }
+#controls button { padding:2px 5px; min-height:30px; min-width:30px; font-size:12px; }
+#controls #toggle { min-width:48px; background:#d9c9a9; color:#282519; }
+footer { display:flex; gap:12px; align-items:center; padding:10px 16px; color:var(--muted); font-size:12px; }
+footer #playback-label { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+footer button { margin-left:auto; padding:5px 9px; font-size:12px; }
+#message { margin:0; padding:0 16px 12px; font-size:13px; }
+#message:empty { padding:0; }
+.settings { margin:8px 16px 20px; padding:20px; background:var(--surface); border:1px solid var(--border); border-radius:8px; }
+details { margin-top:18px; }
+summary { cursor:pointer; margin-bottom:12px; }
+pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+[hidden] { display:none!important; }
+@media(max-width:600px) { #device-label {max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;} footer {gap:8px;padding-inline:9px;} .connection {padding:20px;} }
+@media(prefers-reduced-motion:no-preference) { #album {animation:open-cd .16s ease-out;} @keyframes open-cd {from {opacity:.4;transform:scale(.96);} to {opacity:1;transform:scale(1);}} }
+
+/* Fit the shelf to the viewport and derive every spine from its height. */
+#library { min-height:100dvh; display:flex; flex-direction:column; justify-content:center; background:#000; }
+#deck { height:var(--rack-height,25vw); min-height:0; flex:none; border-top-width:4px; border-bottom-width:5px; padding:3px 4px; }
+.spine { flex:0 0 calc((var(--rack-height,25vw) - 23px) / 12); width:calc((var(--rack-height,25vw) - 23px) / 12); padding:6px 1px; }
+.spine strong { font-size:clamp(9px,calc(var(--rack-height,480px) / 27),16px); }
+.spine i { width:clamp(5px,1vw,12px); height:clamp(5px,1vw,12px); border-width:2px; }
+.spine.active-player { box-shadow:inset 0 0 0 2px var(--gold); }
+footer, #message { display:none; }
+#album { width:min(calc(100% - 18px),calc(100cqh - 45px)); }
+dialog { color:#f3eddf; background:var(--surface); border:1px solid var(--border); border-radius:9px; width:min(460px,calc(100% - 28px)); max-height:90dvh; padding:24px; margin:auto; }
+dialog::backdrop { background:#0009; }
+dialog.settings { margin:auto; }
+
+.settings-heading { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.settings-heading h2 { margin:0; }
+#close-settings { min-width:44px;min-height:44px;padding:0;font-size:25px;background:transparent; }
+.nas-info { margin:24px 0 0;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);overflow-wrap:anywhere; }
+#cover { position:relative; }
+#artwork-loading { position:absolute;inset:0;display:grid;place-items:center;background:#191c17;color:var(--muted);font-size:13px;border-radius:3px 3px 0 0; }
+#real-art { position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#161616;border-radius:3px 3px 0 0; }
+.spine.fatbox { flex-basis:calc((var(--rack-height,25vw) - 23px) / 12 * 2.25);width:calc((var(--rack-height,25vw) - 23px) / 12 * 2.25);display:grid;grid-template-columns:1fr .25fr 1fr;gap:0;padding:0;overflow:hidden;background:#151515; }
+.spine.fatbox strong { height:100%;width:100%;padding:9px 2px;display:flex;align-items:center;background:linear-gradient(90deg,#0005,transparent 25%,#ffffff24 80%,#0005),var(--jacket);border:2px solid #ffffff30; }
+.spine.fatbox .artist-panel { filter:none; }
+.case-centre { height:100%;background:linear-gradient(90deg,#050505,#262626 25%,#080808 75%,#000);box-shadow:inset 1px 0 #ffffff20,inset -1px 0 #ffffff15; }
+.sort-row { display:flex;gap:8px;align-items:stretch; }
+.sort-row select { flex:1;min-width:0; }
+.sort-row button { flex:none;padding-inline:10px; }
+#volume-trigger { flex:none;margin-left:5px;padding-left:6px;border-left:1px solid #676957; }
+#open-volume { width:29px;min-height:30px;padding:0;font-size:12px; }
+#volume-shade { position:absolute;top:0;left:0;width:100%;aspect-ratio:1;pointer-events:none;background:#0007;z-index:3; }
+#volume-dialog { position:fixed;inset:auto;margin:0;width:184px;max-width:calc(100vw - 16px);padding:8px 12px 12px;border-color:#777c67;border-radius:7px;box-shadow:0 5px 22px #000b; }
+#volume-dialog::backdrop { background:transparent; }
+.volume-heading { position:relative;display:flex;align-items:center;justify-content:center;min-height:44px;margin-bottom:8px;padding-right:24px;color:#d2c9b5;font-size:13px; }
+#volume-name { overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
+#close-volume { position:absolute;top:-4px;right:-8px;width:44px;height:44px;background:transparent;border:0;font-size:22px;padding:0; }
+.volume-row { display:grid;grid-template-columns:44px 1fr 44px;gap:8px;align-items:center; }
+.volume-row button,#volume-mute { min-height:44px;padding:8px;border-color:#626750; }
+#volume-level { display:block;text-align:center;font-variant-numeric:tabular-nums;font-weight:500; }
+#volume-mute { width:100%;margin-top:14px; }
+#volume-mute[aria-pressed="true"] { background:var(--gold);color:#282519; }
+#volume-error { margin:8px 0 0;font-size:12px;color:#ffb1a0; }
+#volume-error:empty { display:none; }
+
+/* Carousel keeps a single cover/transport and repositions the existing spines. */
+#carousel-tools { display:flex;justify-content:center;gap:10px;padding:8px; }
+#carousel-tools button { font-size:12px;padding:7px 12px; }
+.carousel-mode #rack { position:relative;overflow:hidden;perspective:900px;touch-action:pan-y;box-shadow:none; }
+.carousel-mode #deck { touch-action:pan-y;--carousel-drag:0px; }
+.carousel-mode #rack .spine { position:absolute;left:50%;top:calc(50% - 18px);height:var(--carousel-cover-size);width:calc(var(--carousel-cover-size) / 12);min-width:0;transition:transform .24s ease; }
+.carousel-mode #rack .spine.fatbox { width:calc(var(--carousel-cover-size) / 12 * 2.25); }
+.carousel-mode #album { width:var(--carousel-cover-size);left:50%!important;top:50%;transform:translate(calc(-50% + var(--carousel-drag, 0px)), -50%);animation:none;z-index:12; }
+.carousel-mode #rack .spine strong { font-size:clamp(9px,calc(var(--carousel-cover-size) / 27),16px); }
+.carousel-arrow { position:absolute;bottom:7px;z-index:13;width:42px;height:34px;padding:0;font-size:28px;line-height:1; }
+#carousel-left { left:14px; }
+#carousel-right { right:14px; }
+@media(prefers-reduced-motion:reduce) { .carousel-mode #rack .spine { transition:none; } }

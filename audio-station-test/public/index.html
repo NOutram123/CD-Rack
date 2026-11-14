@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#23241f">
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css">
+<title>CD Rack</title><script src="/app.js" type="module"></script>
+</head>
+<body>
+<main>
+<section id="connection" class="connection">
+<h1>Connect your music</h1>
+<p id="connection-message" role="status" aria-live="polite">Finding your Synology NAS…</p>
+<form id="login" hidden>
+<label for="address">NAS address</label>
+<div class="address-row"><input id="address" type="url" placeholder="http://YourNASName.local:5000" required><button id="discover" type="button">Find NAS</button></div>
+<label id="discovered-label" for="discovered" hidden>Discovered NAS</label><select id="discovered" hidden></select>
+<label for="account">DSM username</label><input id="account" autocomplete="username" required>
+<label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+<label for="otp">Verification code, if enabled</label><input id="otp" autocomplete="one-time-code" inputmode="numeric">
+<p class="help" id="transport"></p><button id="sign-in" class="primary" type="submit">Sign in</button>
+</form>
+<div class="demo-entry"><button id="demo-button" type="button">Demo</button><p class="help">Explore sample albums with silent simulated controls. No NAS needed.</p></div>
+<section id="output-setup" hidden>
+<label for="players">Play through</label><select id="players"></select>
+<p class="help">Choose the device that will play your music.</p>
+<div class="actions"><button id="open-rack" class="primary">Open rack</button><button id="refresh-players">Find devices again</button></div>
+</section>
+</section>
+<section id="library" hidden aria-label="CD library">
+<p id="demo-banner" role="status" hidden>Demo mode - simulated playback, no sound</p>
+<nav id="carousel-tools" aria-label="Carousel tools" hidden><button id="carousel-settings">Settings</button><button id="carousel-now-playing">Now Playing</button></nav>
+<div id="deck" aria-label="CD rack">
+<div id="rack" role="group" aria-label="Album spines"></div>
+<button id="carousel-left" class="carousel-arrow" aria-label="Previous album" hidden>‹</button>
+<button id="carousel-right" class="carousel-arrow" aria-label="Next album" hidden>›</button>
+<section id="album" hidden aria-label="Selected CD">
+<button id="cover" aria-label="Album cover. Double-tap to return to the rack"><canvas id="art" width="640" height="640" role="img" aria-label="Album artwork"></canvas><img id="real-art" alt="" hidden><span id="artwork-loading" role="status" hidden>Loading artwork…</span></button>
+<div id="transport-row"><span id="track" role="status" aria-live="polite"></span><div id="controls"><button id="previous" aria-label="Previous track" disabled>⏮</button><button id="toggle" disabled>Play</button><button id="next" aria-label="Next track" disabled>⏭</button></div><div id="volume-trigger"><button id="open-volume" aria-label="Open amplifier volume" aria-haspopup="dialog" aria-expanded="false">V</button></div></div>
+<div id="volume-shade" hidden aria-hidden="true"></div>
+</section>
+</div>
+<p id="empty-library" role="status" hidden>No albums found. Add music to Audio Station, then use Settings → Refresh Rack.</p>
+<footer><span id="device-label"></span><span id="playback-label" aria-live="polite"></span><button id="settings-button">Connection</button></footer>
+<p id="message" role="status" aria-live="polite"></p>
+<dialog id="settings" class="settings">
+<div class="settings-heading"><h2>Settings</h2><button id="close-settings" aria-label="Close settings">×</button></div>
+<label for="view-mode">Display mode</label><select id="view-mode"><option value="rack">Rack</option><option value="carousel">Carousel</option></select>
+<label for="display-size">CD size</label><input id="display-size" type="range" min="1" max="3" step="0.25" value="1"><p class="help">Larger CDs show fewer spines while keeping their proportions.</p>
+<label for="sort-by">Sort by</label>
+<div class="sort-row"><select id="sort-by"><option value="artist">Artist name</option><option value="album">Album name</option><option value="date">Album date</option></select><button id="refresh-rack">Refresh Rack</button></div>
+<p id="output-label"></p>
+<div class="actions"><button id="change-output">Change output device</button></div>
+<div class="actions"><button id="exit-demo" hidden>Exit Demo</button></div>
+<p id="nas-label" class="nas-info"></p>
+</dialog>
+</section>
+<dialog id="error-dialog"><h2>Connection needs attention</h2><p id="error-text"></p><div class="actions"><button id="error-close">Close</button><button id="error-settings">Settings</button></div></dialog>
+<dialog id="volume-dialog" aria-label="Amplifier volume">
+<div class="volume-heading"><span id="volume-name">Volume</span><button id="close-volume" aria-label="Close volume">×</button></div>
+<div class="volume-row"><button id="volume-down" aria-label="Volume down" disabled>−</button><output id="volume-level" aria-label="Current volume" aria-live="polite">…</output><button id="volume-up" aria-label="Volume up" disabled>+</button></div>
+<button id="volume-mute" aria-pressed="false" disabled>Mute</button><p id="volume-error" role="status" aria-live="polite"></p>
+</dialog>
+</main>
+</body>
+</html>

@@ -1,0 +1,16 @@
+node_modules/
+**/dist/
+**/.vercel/
+output/
+tmp/
+**/catalogue/
+.env
+.env.*
+!.env.example
+*.log
+*.tgz
+*.pem
+*.key
+.ssh/
+__pycache__/
+*.pyc

@@ -12,15 +12,23 @@ export function createDemoPlayer(examples, now = Date.now) {
   }));
   let queue = [], index = 0, state = 'stopped', albumId = null;
   let started = now(), level = 35, restore;
+  let continuous = false, order = [], advance, serial = 0;
   function snapshot() {
     if (state === 'playing') {
       const steps = Math.floor((now() - started) / 30000);
       if (steps > 0) {
         index += steps; started += steps * 30000;
-        if (index >= queue.length) { index = Math.max(0, queue.length - 1); state = 'stopped'; }
+        if (index >= queue.length) {
+          const current = order.indexOf(albumId);
+          const next = continuous && current >= 0 && albums.find(album => album.id === order[(current + 1) % order.length]);
+          if (next) {
+            albumId = next.id; queue = tracks(next); index = 0; started = now();
+            advance = { serial: ++serial, album: albumId };
+          } else { index = Math.max(0, queue.length - 1); state = 'stopped'; }
+        }
       }
     }
-    return { album: albumId, status: { state, index, song: queue[index] }, queue: { current: index, songs: queue } };
+    return { album: albumId, status: { state, index, song: queue[index] }, queue: { current: index, songs: queue }, continuousAdvance: advance };
   }
   return {
     async request(endpoint, data = {}) {
@@ -33,6 +41,9 @@ export function createDemoPlayer(examples, now = Date.now) {
       if (endpoint === 'play') {
         const album = albums.find(album => album.id === data.album);
         if (!album) throw Error('Demo album not found.');
+        if (data.continuous !== undefined) continuous = data.continuous;
+        if (data.order) order = data.order.filter(id => albums.some(album => album.id === id));
+        advance = undefined;
         queue = tracks(album); albumId = album.id; index = 0; state = 'playing'; started = now();
         return snapshot();
       }
@@ -47,6 +58,11 @@ export function createDemoPlayer(examples, now = Date.now) {
         return snapshot();
       }
       if (endpoint === 'state') return snapshot();
+      if (endpoint === 'continuous') {
+        continuous = data.enabled;
+        order = data.order.filter(id => albums.some(album => album.id === id));
+        return { success: true };
+      }
       if (endpoint === 'volume') {
         if (data.action === 'mute') {
           if (level > 0) { restore = level; level = 0; }

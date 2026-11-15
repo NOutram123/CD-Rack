@@ -8,6 +8,8 @@ import { readableText } from './public/spine-colour.js';
 import { hostname, networkInterfaces } from 'node:os';
 import { sessionCookie, sessionExpired, maintainSessions } from './session-policy.mjs';
 import { artworkThumbnail } from './artwork-thumbnail.mjs';
+import { completionSample, albumFinished } from './continuous-play.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const port = Number(process.env.PORT || 8787);
 const bindAddress = process.env.BIND_ADDRESS || '127.0.0.1';
@@ -31,6 +33,16 @@ function requestOrigin(req) {
 }
 const sessions = new Map();
 const playerLocks = new Set();
+const continuousPlayers = new Map();
+let continuousSerial = 0;
+async function claimPlayerLock(key) {
+  const deadline = Date.now() + 30000;
+  while (playerLocks.has(key)) {
+    if (Date.now() > deadline) throw new ApiError('The receiver is still busy. Try again.', 409);
+    await delay(25);
+  }
+  playerLocks.add(key);
+}
 const mutedVolumes = new Map();
 const nasCandidates = new Map();
 const catalogues = new Map();
@@ -252,6 +264,81 @@ async function playbackState(session, id) {
   return { status, queue, album: album?.id || null };
 }
 
+async function startAlbum(session, player, album) {
+  const tracks = await tracksFor(session, album);
+  if (!tracks.length) throw new ApiError('This album has no tracks.');
+  const status = await request(session, 'SYNO.AudioStation.RemotePlayer', 'getstatus', { id: player });
+  // Some versions report the requested page size as getplaylist.total.
+  // Use the renderer's full count, with a full-list fallback for older APIs.
+  let total = Number(status.playlist_total);
+  if (!Number.isInteger(total) || total < 0) {
+    const queue = await request(session, 'SYNO.AudioStation.RemotePlayer', 'getplaylist', { id: player, offset: 0, limit: 100000 });
+    total = Number(queue.total);
+  }
+  if (!Number.isInteger(total) || total < 0) throw new ApiError('Could not determine the existing queue length.');
+  await request(session, 'SYNO.AudioStation.RemotePlayer', 'updateplaylist', {
+    id: player, library: 'all', offset: 0, limit: total, updated_index: -1,
+    songs: tracks.map(song => song.id).join(','), containers_json: '[]', play: 'false',
+  });
+  await request(session, 'SYNO.AudioStation.RemotePlayer', 'control', { id: player, action: 'play', value: 0 });
+  return tracks;
+}
+
+function continuousOrder(session, order) {
+  if (!Array.isArray(order) || order.length > 50000 || order.some(id => typeof id !== 'string')) throw new ApiError('Invalid continuous album order.');
+  const available = new Set((session.albums || []).filter(album => album.trackCount > 0).map(album => album.id));
+  return [...new Set(order)].filter(id => available.has(id));
+}
+
+async function configureContinuous(session, player, enabled, order) {
+  assertPlayer(session, player);
+  const key = `${session.address}|${player}`;
+  await claimPlayerLock(key);
+  try {
+    if (!enabled) { continuousPlayers.delete(key); return; }
+    const ordered = continuousOrder(session, order);
+    const existing = continuousPlayers.get(key);
+    if (existing?.session === session) { existing.order = ordered; return; }
+    const state = await playbackState(session, player);
+    // Enabling is a preference change, never a command to start a stopped player.
+    if (state.status.state !== 'playing' || !ordered.includes(state.album)) return;
+    continuousPlayers.set(key, { session, player, order: ordered, album: state.album, previous: completionSample(state) });
+  } finally { playerLocks.delete(key); }
+}
+
+async function advanceContinuousPlayers() {
+  await Promise.all([...continuousPlayers].map(async ([key, plan]) => {
+    if (playerLocks.has(key)) return;
+    if (sessionExpired(plan.session) || ![...sessions.values()].includes(plan.session)) { continuousPlayers.delete(key); return; }
+    playerLocks.add(key);
+    try {
+      const state = await playbackState(plan.session, plan.player);
+      const current = completionSample(state);
+      if (current.ids !== plan.previous.ids || (state.album && state.album !== plan.album)) {
+        continuousPlayers.delete(key); return;
+      }
+      if (albumFinished(plan.previous, current)) {
+        const index = plan.order.indexOf(plan.album);
+        if (index < 0 || !plan.order.length) { continuousPlayers.delete(key); return; }
+        const album = plan.order[(index + 1) % plan.order.length];
+        // Claim the transition before issuing any command; failures are not retried.
+        continuousPlayers.delete(key);
+        const tracks = await startAlbum(plan.session, plan.player, album);
+        plan.album = album;
+        plan.advance = { serial: ++continuousSerial, album };
+        plan.previous = completionSample({ status: { state: 'playing', index: 0, position: 0, song: tracks[0] }, queue: { songs: tracks } });
+        continuousPlayers.set(key, plan);
+      } else {
+        plan.previous = current;
+        if (['stopped', 'stop'].includes(current.state)) continuousPlayers.delete(key);
+      }
+    } catch {
+      continuousPlayers.delete(key);
+      // An ambiguous network failure must never issue the same Play twice.
+    } finally { playerLocks.delete(key); }
+  }));
+}
+
 async function readVolume(session, id) {
   assertPlayer(session, id);
   const player = session.players.find(player => player.id === id);
@@ -268,8 +355,7 @@ async function changeVolume(session, id, action) {
   assertPlayer(session, id);
   if (action && !['up', 'down', 'mute'].includes(action)) throw new ApiError('Unsupported volume action.');
   const key = `${session.address}|${id}`;
-  if (playerLocks.has(key)) throw new ApiError('A receiver command is already in progress.', 409);
-  playerLocks.add(key);
+  await claimPlayerLock(key);
   try {
     const current = await readVolume(session, id);
     if (!action) return current;
@@ -353,31 +439,30 @@ async function route(req, res) {
   if (url.pathname === '/api/spine-colour') return reply(res, 200, await saveSpineStyle(session, body.album, body.background));
   if (url.pathname === '/api/tracks') return reply(res, 200, await tracksFor(session, body.album));
   if (url.pathname === '/api/players') return reply(res, 200, await playersFor(session));
-  if (url.pathname === '/api/state') return reply(res, 200, await playbackState(session, body.player));
+  if (url.pathname === '/api/state') {
+    const state = await playbackState(session, body.player);
+    state.continuousAdvance = continuousPlayers.get(`${session.address}|${body.player}`)?.advance;
+    return reply(res, 200, state);
+  }
+  if (url.pathname === '/api/continuous') {
+    if (typeof body.enabled !== 'boolean') throw new ApiError('Choose Yes or No for continuous play.');
+    await configureContinuous(session, body.player, body.enabled, body.order);
+    return reply(res, 200, { success: true });
+  }
   if (url.pathname === '/api/volume') return reply(res, 200, await changeVolume(session, body.player, body.action));
   if (!['/api/play', '/api/control'].includes(url.pathname)) throw new ApiError('Unknown endpoint.', 404);
   assertPlayer(session, body.player);
   const lock = `${session.address}|${body.player}`;
-  if (playerLocks.has(lock)) throw new ApiError('A playback command is already in progress.', 409);
-  playerLocks.add(lock);
+  await claimPlayerLock(lock);
   try {
     if (url.pathname === '/api/play') {
-      const tracks = await tracksFor(session, body.album);
-      if (!tracks.length) throw new ApiError('This album has no tracks.');
-      const status = await request(session, 'SYNO.AudioStation.RemotePlayer', 'getstatus', { id: body.player });
-      // Some versions report the requested page size as getplaylist.total.
-      // Use the renderer's full count, with a full-list fallback for older APIs.
-      let total = Number(status.playlist_total);
-      if (!Number.isInteger(total) || total < 0) {
-        const queue = await request(session, 'SYNO.AudioStation.RemotePlayer', 'getplaylist', { id: body.player, offset: 0, limit: 100000 });
-        total = Number(queue.total);
+      const order = body.continuous === true ? continuousOrder(session, body.order) : [];
+      continuousPlayers.delete(lock);
+      const tracks = await startAlbum(session, body.player, body.album);
+      if (body.continuous === true) {
+        continuousPlayers.set(lock, { session, player: body.player, album: body.album, order,
+          previous: completionSample({ status: { state: 'playing', index: 0, position: 0, song: tracks[0] }, queue: { songs: tracks } }) });
       }
-      if (!Number.isInteger(total) || total < 0) throw new ApiError('Could not determine the existing queue length.');
-      await request(session, 'SYNO.AudioStation.RemotePlayer', 'updateplaylist', {
-        id: body.player, library: 'all', offset: 0, limit: total, updated_index: -1,
-        songs: tracks.map(song => song.id).join(','), containers_json: '[]', play: 'false',
-      });
-      await request(session, 'SYNO.AudioStation.RemotePlayer', 'control', { id: body.player, action: 'play', value: 0 });
     } else {
       if (!['play', 'pause', 'prev', 'next'].includes(body.action)) throw new ApiError('Unsupported playback action.');
       if (['prev', 'next'].includes(body.action)) {
@@ -386,6 +471,8 @@ async function route(req, res) {
         if (!Number.isInteger(index) || index < 0 || (body.action === 'prev' && index === 0) || (body.action === 'next' && index >= queue.total - 1)) throw new ApiError('You have reached the end of this album.');
       }
       await request(session, 'SYNO.AudioStation.RemotePlayer', 'control', { id: body.player, action: body.action });
+      const plan = continuousPlayers.get(lock);
+      if (plan) plan.previous = { ...plan.previous, state: 'command' };
     }
     return reply(res, 200, { success: true });
   } finally { playerLocks.delete(lock); }
@@ -395,7 +482,13 @@ const server = http.createServer((req, res) => {
   route(req, res).catch(error => reply(res, error.status || 500, { error: error.status ? error.message : 'Could not connect to the NAS. Check the address and connection.' }));
 });
 server.listen(port, bindAddress, () => console.log(`Home Music is listening on ${bindAddress}:${port}${fixedOrigin ? ` (${origin})` : ''}`));
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGTERM', () => {
+  server.close(() => process.exit(0));
+  // A stalled browser/NAS request must not leave deployment waiting forever.
+  setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 5000).unref();
+});
 setInterval(() => {
   void maintainSessions(sessions, session => request(session, 'SYNO.AudioStation.RemotePlayer', 'list', { type: 'all' }));
 }, 60000).unref();
+
+setInterval(() => { void advanceContinuousPlayers(); }, 2000).unref();

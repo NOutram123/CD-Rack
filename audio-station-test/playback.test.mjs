@@ -11,7 +11,8 @@ test('Audio Station album playback replaces duplicate queues and keeps track con
   let replacementCalls = 0;
   let libraryScans = 0;
   let volume = 40;
-  const songs = [1, 2].map(index => ({ id: `music_${index}`, title: `Track ${index}`, path: `/volume1/music/Test Artist/Test Album/${index}.flac`, additional: { song_tag: { album: 'Test Album', album_artist: 'Test Artist', track: index, disc: 1 } } }));
+  let position = 0;
+  const songs = [1, 2].map(index => ({ id: `music_${index}`, title: `Track ${index}`, path: `/volume1/music/Test Artist/Test Album/${index}.flac`, additional: { song_audio: { duration: 30 }, song_tag: { album: 'Test Album', album_artist: 'Test Artist', track: index, disc: 1 } } }));
   const names = ['SYNO.API.Auth', 'SYNO.AudioStation.Album', 'SYNO.AudioStation.Song', 'SYNO.AudioStation.RemotePlayer'];
   const apis = Object.fromEntries(names.map(name => [name, { path: 'entry.cgi', maxVersion: 3 }]));
   const nas = http.createServer(async (req, res) => {
@@ -31,7 +32,7 @@ test('Audio Station album playback replaces duplicate queues and keeps track con
       if (api === 'SYNO.AudioStation.RemotePlayer') {
         if (method === 'list') data = { players: [{ id: 'denon-test', name: 'Denon', type: 'dlna' }] };
         if (method === 'getplaylist') data = { total: Math.min(queue.length, Number(params.get('limit') || queue.length)), current, songs: queue.map(id => songs.find(song => song.id === id) || { id }) };
-        if (method === 'getstatus') data = { volume, playlist_total: queue.length, index: current, state: playback, song: songs.find(song => song.id === queue[current]) };
+        if (method === 'getstatus') data = { volume, position, playlist_total: queue.length, index: current, state: playback, song: songs.find(song => song.id === queue[current]) };
         if (method === 'updateplaylist') {
           replacementCalls++;
           queue.splice(Number(params.get('offset')), Number(params.get('limit')), ...params.get('songs').split(','));
@@ -131,6 +132,39 @@ test('Audio Station album playback replaces duplicate queues and keeps track con
     const activity = JSON.stringify((await call('trace')).data);
     assert.ok(!activity.includes('dummy') && !activity.includes('test-session-only'));
     assert.equal((await call('control', { player: 'denon-test', action: 'play' }, 'https://unrelated.example')).status, 403);
+    // NAS-side continuation advances with no browser state polling at all.
+    songs.push(...[3, 4].map(index => ({ id: `music_${index}`, title: `Track ${index}`, path: `/volume1/music/Test Artist/Second Album/${index}.flac`, additional: { song_audio: { duration: 30 }, song_tag: { album: 'Second Album', album_artist: 'Test Artist', track: index - 2, disc: 1 } } })));
+    const all = (await call('albums', { refresh: true })).data;
+    const nextAlbum = all.find(album => album.name === 'Second Album');
+    const config = { player: 'denon-test', enabled: true, order: [albums[0].id, 'artwork-preview', nextAlbum.id] };
+    playback = 'stopped';
+    assert.equal((await call('continuous', config)).status, 200);
+    assert.equal(playback, 'stopped', 'enabling never starts a stopped receiver');
+    playback = 'playing'; current = 1; position = 29;
+    assert.equal((await call('continuous', config)).status, 200);
+    playback = 'stopped'; position = 0;
+    const beforeAdvance = replacementCalls;
+    for (let i = 0; i < 120 && (replacementCalls === beforeAdvance || playback !== 'playing'); i++) await delay(50);
+    assert.equal(replacementCalls, beforeAdvance + 1, 'server advances without browser polling');
+    assert.deepEqual(queue, ['music_3', 'music_4'], 'next playable album follows browser rack order');
+    assert.equal(playback, 'playing');
+    await delay(2100);
+    assert.equal(replacementCalls, beforeAdvance + 1, 'one completion issues one Play');
+    assert.equal((await call('state', { player: 'denon-test' })).data.continuousAdvance.album, nextAlbum.id);
+    await call('continuous', { ...config, enabled: false });
+    current = 1; position = 29; playback = 'playing';
+    await delay(2100);
+    playback = 'stopped';
+    await delay(2100);
+    assert.equal(replacementCalls, beforeAdvance + 1, 'No prevents another album starting');
+    playback = 'playing';
+    await call('continuous', config);
+    await call('control', { player: 'denon-test', action: 'pause' });
+    await delay(2100);
+    playback = 'stopped';
+    await delay(2100);
+    assert.equal(replacementCalls, beforeAdvance + 1, 'pause followed by stop never advances');
+
   } finally {
     child.kill();
     await new Promise(resolve => nas.close(resolve));

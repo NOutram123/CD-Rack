@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createDemoPlayer } from './public/demo-player.js';
 import { sortRackAlbums } from './public/rack-sort.js';
-import { wrapAlbum, carouselNeighbours } from './public/carousel.js';
+import { wrapAlbum, carouselNeighbours, carouselSpineScale, carouselSwipeSteps } from './public/carousel.js';
 
 // Execute the complete browser controller with a small DOM double. In particular,
 // fetch is real controller code here, so an accidental demo NAS call fails tests.
@@ -12,9 +12,9 @@ async function appHarness(publicDemo = false, nasAlbums = []) {
   const html = await readFile(new URL('./public/index.html', import.meta.url), 'utf8');
   const source = (await readFile(new URL('./public/app.js', import.meta.url), 'utf8')).replace(/^import .*$/gm, '');
   class Element {
-    hidden = false; open = false; value = ''; textContent = ''; disabled = false; scrollLeft = 0;
+    hidden = false; open = false; value = ''; textContent = ''; disabled = false; scrollLeft = 0; clientWidth = 800;
     children = []; attributes = {}; handlers = {};
-    style = { setProperty() {} }; classList = { toggle() {} };
+    style = { properties: {}, setProperty(key, value) { this.properties[key] = value; } }; classList = { toggle() {}, remove() {} };
     addEventListener(name, fn) { this.handlers[name] = fn; }
     replaceChildren(...children) { this.children = children; }
     append(...children) { this.children.push(...children); }
@@ -34,7 +34,7 @@ async function appHarness(publicDemo = false, nasAlbums = []) {
   if (publicDemo) nodes.delete('login');
   const requests = [], storage = new Map([['cd-rack-ready', 'yes'], ['cd-rack-sort', 'album']]);
   const context = vm.createContext({
-    demoOnly: publicDemo, createDemoPlayer, sortRackAlbums, wrapAlbum, carouselNeighbours, estimateSpineColour() {},
+    demoOnly: publicDemo, createDemoPlayer, sortRackAlbums, wrapAlbum, carouselNeighbours, carouselSpineScale, carouselSwipeSteps, estimateSpineColour() {},
     document: { addEventListener() {}, getElementById: id => nodes.get(id) || null, createElement: () => new Element(), querySelectorAll: () => [...nodes.values()].filter(node => node.open), body: new Element() },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     IntersectionObserver: class { observe() {} unobserve() {} disconnect() {} },
@@ -57,7 +57,7 @@ test('public demo UI makes zero NAS calls through browsing, transport, volume, s
   const h = await appHarness(true);
   assert.equal(h.requests.length, 0, 'public landing page skips discovery and sessions');
   await h.nodes.get('demo-button').onclick();
-  assert.equal(h.nodes.get('rack').children.length, 99);
+  assert.equal(h.nodes.get('rack').children.length, 97);
   assert.equal(h.nodes.get('demo-banner').hidden, false);
   await h.run('selectAlbum(2)');
   assert.equal(h.nodes.get('real-art').attributes.src, undefined);
@@ -81,10 +81,61 @@ test('public demo UI makes zero NAS calls through browsing, transport, volume, s
   assert.equal(h.requests.length, 0, 'no API requests in public demo, including exit');
 });
 
+test('settings default to Rack and Yes; continuous playback follows the applied order and focuses the next album', async () => {
+  const h = await appHarness(true);
+  await h.nodes.get('demo-button').onclick();
+  assert.equal(h.nodes.get('view-rack').attributes['aria-pressed'], 'true');
+  assert.equal(h.nodes.get('continuous-yes').attributes['aria-pressed'], 'true');
+  await h.run('demoTime = 0; demoPlayer = createDemoPlayer(exampleAlbums.slice(0, 3), () => demoTime); loadLibrary()');
+  await h.nodes.get('view-carousel').onclick();
+  assert.equal(h.nodes.get('view-carousel').attributes['aria-pressed'], 'true');
+  await h.run('selectAlbum(2)');
+  await h.run("command('toggle')");
+  const next = h.run('rackAlbums[3].id');
+  const duration = h.run('selectedTracks.length * 30000');
+  await h.run(`demoTime += ${duration}; poll()`);
+  assert.equal(h.run('rackAlbums[selected].id'), next);
+  assert.equal((await h.run("api('state')")).status.state, 'playing');
+  await h.nodes.get('continuous-no').onclick();
+  assert.equal(h.storage.get('demo-cd-rack-continuous'), 'no');
+  assert.equal(h.nodes.get('continuous-no').attributes['aria-pressed'], 'true');
+  await h.run('demoTime += selectedTracks.length * 30000; poll()');
+  assert.equal((await h.run("api('state')")).status.state, 'stopped');
+  await h.nodes.get('continuous-yes').onclick();
+  assert.equal((await h.run("api('state')")).status.state, 'stopped');
+  assert.equal(h.requests.length, 0);
+});
+
+test('pinned Rack utilities still respond after dragging the album shelf', async () => {
+  const h = await appHarness(true);
+  await h.nodes.get('demo-button').onclick();
+  await h.run('selectAlbum(2)');
+  await h.run("command('toggle')");
+  const playing = h.run('rackAlbums[selected].id');
+  await h.run('selectAlbum(3)');
+  const rack = h.nodes.get('rack');
+  const dragShelf = () => {
+    rack.handlers.pointerdown({ pointerType: 'mouse', button: 0, clientX: 200 });
+    rack.handlers.pointermove({ buttons: 1, clientX: 100 });
+    rack.handlers.pointerup();
+    assert.equal(h.run('dragged'), true);
+  };
+  dragShelf();
+  h.nodes.get('pinned-tools').children[0].handlers.click({ detail: 1 });
+  assert.equal(h.nodes.get('settings').open, true, 'a previous shelf drag must not suppress Settings');
+  h.nodes.get('settings').close();
+  dragShelf();
+  h.nodes.get('pinned-tools').children[1].handlers.click({ detail: 1 });
+  await new Promise(setImmediate);
+  assert.equal(h.run('rackAlbums[selected].id'), playing, 'Now Playing must reopen the playing album after a shelf drag');
+  assert.equal((await h.run("api('state')")).status.state, 'playing');
+  assert.equal(h.requests.length, 0);
+});
+
 test('an empty NAS rack retains Settings and Now Playing without synthetic albums', async () => {
   const h = await appHarness(false);
   assert.equal(h.nodes.get('library').hidden, false);
-  assert.equal(h.nodes.get('rack').children.length, 2);
+  assert.equal(h.nodes.get('rack').children.length, 0);
   assert.equal(h.nodes.get('empty-library').hidden, false);
   assert.equal(h.run('rackAlbums[0].title'), 'Settings');
   assert.equal(h.run('rackAlbums[1].title'), 'Now Playing');
@@ -99,10 +150,10 @@ test('an empty NAS rack retains Settings and Now Playing without synthetic album
 test('carousel browsing wraps silently, Now Playing restores focus and volume blocks navigation', async () => {
   const h = await appHarness(true);
   await h.nodes.get('demo-button').onclick();
-  h.nodes.get('view-mode').value = 'carousel';
-  await h.nodes.get('view-mode').onchange();
+  await h.nodes.get('view-carousel').onclick();
   assert.equal(h.run('selected'), 2);
-  assert.equal(h.nodes.get('carousel-tools').hidden, false);
+  assert.equal(h.nodes.get('pinned-tools').children.length, 2);
+  assert.ok(h.nodes.get('pinned-tools').children.every(button => !button.hidden));
   assert.equal(h.nodes.get('toggle').textContent, 'Play', 'entering carousel does not play');
   await h.nodes.get('carousel-left').onclick();
   assert.equal(h.run('selected'), 98, 'previous wraps to last album');
@@ -113,7 +164,7 @@ test('carousel browsing wraps silently, Now Playing restores focus and volume bl
   await h.nodes.get('carousel-right').onclick();
   assert.equal(h.run('rackAlbums[selected].id') === playing, false, 'selection stays separate from playback');
   assert.equal((await h.run("api('state')")).album, playing);
-  await h.nodes.get('carousel-now-playing').onclick();
+  await h.run('selectAlbum(1)');
   assert.equal(h.run('rackAlbums[selected].id'), playing);
   await h.nodes.get('open-volume').onclick({ stopPropagation() {} });
   const selected = h.run('selected');
@@ -121,21 +172,51 @@ test('carousel browsing wraps silently, Now Playing restores focus and volume bl
   assert.equal(h.run('selected'), selected);
   assert.equal(h.requests.length, 0);
   await h.nodes.get('close-volume').onclick({ stopPropagation() {} });
-  h.nodes.get('view-mode').value = 'rack';
-  await h.nodes.get('view-mode').onchange();
-  assert.equal(h.nodes.get('carousel-tools').hidden, true);
+  await h.nodes.get('view-rack').onclick();
+  assert.ok(h.nodes.get('pinned-tools').children.every(button => !button.hidden));
   assert.ok(h.nodes.get('rack').children.every(button => !button.hidden));
 });
 
 test('an empty carousel keeps fixed utilities usable and disables album navigation', async () => {
   const h = await appHarness(false);
-  h.nodes.get('view-mode').value = 'carousel';
-  await h.nodes.get('view-mode').onchange();
+  await h.nodes.get('view-carousel').onclick();
   assert.equal(h.nodes.get('empty-library').hidden, false);
   assert.equal(h.nodes.get('carousel-left').disabled, true);
   assert.equal(h.nodes.get('carousel-right').disabled, true);
-  h.nodes.get('carousel-settings').onclick();
+  await h.run('selectAlbum(0)');
   assert.equal(h.nodes.get('settings').open, true);
+});
+
+test('cover and spine swipes rotate in both directions without playback; native art dragging is blocked', async () => {
+  const h = await appHarness(true);
+  await h.nodes.get('demo-button').onclick();
+  await h.nodes.get('view-carousel').onclick();
+  const deck = h.nodes.get('deck');
+  for (const pointerType of ['mouse', 'touch']) {
+    for (const dx of [-90, 90]) {
+      const before = h.run('selected');
+      const event = { pointerType, pointerId: 1, button: 0, clientX: 200, clientY: 100, target: { closest: () => null }, preventDefault() {} };
+      deck.handlers.pointerdown(event);
+      deck.handlers.pointermove({ ...event, clientX: 200 + dx });
+      deck.handlers.pointerup({ ...event, type: 'pointerup', clientX: 200 + dx });
+      await new Promise(setImmediate);
+      assert.equal(h.run('selected'), wrapAlbum(before - 2 + (dx < 0 ? 1 : -1), 97) + 2);
+      assert.equal((await h.run("api('state')")).status.state, 'stopped');
+    }
+  }
+  let prevented = false;
+  deck.handlers.dragstart({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(deck.style.properties['--carousel-drag'], undefined, 'swipes never displace the artwork or spines');
+  const before = h.run('selected');
+  const event = { pointerId: 2, button: 0, clientX: 650, clientY: 100, target: { closest: () => null }, preventDefault() {} };
+  deck.handlers.pointerdown(event);
+  deck.handlers.pointermove({ ...event, clientX: 150 });
+  deck.handlers.pointerup({ ...event, type: 'pointerup', clientX: 150 });
+  await new Promise(setImmediate);
+  assert.equal(h.run('selected'), wrapAlbum(before - 2 + 4, 97) + 2, 'long swipes advance four albums');
+  assert.ok(h.nodes.get('pinned-tools').children.every(button => !button.hidden));
+  assert.equal(h.requests.length, 0);
 });
 
 test('one, two and three album carousels show each neighbour only once and never start playback', async () => {
@@ -143,8 +224,7 @@ test('one, two and three album carousels show each neighbour only once and never
     const h = await appHarness(true);
     await h.nodes.get('demo-button').onclick();
     await h.run(`demoPlayer = createDemoPlayer(exampleAlbums.slice(0, ${count})); loadLibrary()`);
-    h.nodes.get('view-mode').value = 'carousel';
-    await h.nodes.get('view-mode').onchange();
+    await h.nodes.get('view-carousel').onclick();
     assert.equal(h.nodes.get('rack').children.filter(button => !button.hidden).length, count - 1);
     assert.equal(h.nodes.get('carousel-left').disabled, count === 1);
     for (let i = 0; i < count; i++) await h.nodes.get('carousel-right').onclick();

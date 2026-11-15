@@ -1,4 +1,4 @@
-const cacheName = 'cd-rack-v7';
+const cacheName = 'cd-rack-v10';
 const shell = ['/', '/app.js', '/config.js', '/demo-player.js', '/carousel.js', '/spine-colour.js', '/rack-sort.js', '/style.css', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(shell))); self.skipWaiting(); });
 self.addEventListener('activate', event => {

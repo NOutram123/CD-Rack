@@ -60,7 +60,7 @@ pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
 .spine i { width:clamp(5px,1vw,12px); height:clamp(5px,1vw,12px); border-width:2px; }
 .spine.active-player { box-shadow:inset 0 0 0 2px var(--gold); }
 footer, #message { display:none; }
-#album { width:min(calc(100% - 18px),calc(100cqh - 45px)); }
+#album { width:min(calc(100% - var(--pinned-width, 0px) - 18px),calc(100cqh - 45px)); }
 dialog { color:#f3eddf; background:var(--surface); border:1px solid var(--border); border-radius:9px; width:min(460px,calc(100% - 28px)); max-height:90dvh; padding:24px; margin:auto; }
 dialog::backdrop { background:#0009; }
 dialog.settings { margin:auto; }
@@ -96,15 +96,27 @@ dialog.settings { margin:auto; }
 #volume-error:empty { display:none; }
 
 /* Carousel keeps a single cover/transport and repositions the existing spines. */
-#carousel-tools { display:flex;justify-content:center;gap:10px;padding:8px; }
-#carousel-tools button { font-size:12px;padding:7px 12px; }
+#deck { --pinned-width:calc((var(--rack-height,480px) - 23px) / 6 + 12px); }
+#pinned-tools { position:absolute;left:8px;top:7px;bottom:7px;width:calc(var(--pinned-width) - 12px);display:flex;gap:2px;z-index:14; }
+#pinned-tools .spine { min-width:0;overflow:hidden; }
+#rack { margin-left:var(--pinned-width); }
+.spine { overflow:hidden; }
+.spine strong { max-width:100%; }
 .carousel-mode #rack { position:relative;overflow:hidden;perspective:900px;touch-action:pan-y;box-shadow:none; }
-.carousel-mode #deck { touch-action:pan-y;--carousel-drag:0px; }
+.carousel-mode #deck { touch-action:pan-y; }
 .carousel-mode #rack .spine { position:absolute;left:50%;top:calc(50% - 18px);height:var(--carousel-cover-size);width:calc(var(--carousel-cover-size) / 12);min-width:0;transition:transform .24s ease; }
 .carousel-mode #rack .spine.fatbox { width:calc(var(--carousel-cover-size) / 12 * 2.25); }
-.carousel-mode #album { width:var(--carousel-cover-size);left:50%!important;top:50%;transform:translate(calc(-50% + var(--carousel-drag, 0px)), -50%);animation:none;z-index:12; }
+.carousel-mode #album { width:var(--carousel-cover-size);left:calc(50% + var(--pinned-width) / 2)!important;top:50%;transform:translate(-50%, -50%);animation:none;z-index:12; }
+.carousel-mode #cover,.carousel-mode #cover * { touch-action:pan-y;user-select:none;-webkit-user-drag:none; }
+.carousel-mode #rack .spine.unlabelled strong,.carousel-mode #rack .spine.unlabelled i { visibility:hidden; }
 .carousel-mode #rack .spine strong { font-size:clamp(9px,calc(var(--carousel-cover-size) / 27),16px); }
-.carousel-arrow { position:absolute;bottom:7px;z-index:13;width:42px;height:34px;padding:0;font-size:28px;line-height:1; }
-#carousel-left { left:14px; }
-#carousel-right { right:14px; }
+.carousel-arrow { position:absolute;top:calc(50% - 18px);transform:translateY(-50%);z-index:13;width:42px;height:42px;padding:0;font-size:28px;line-height:1; }
+#carousel-left { left:calc(50% + var(--pinned-width) / 2 - var(--carousel-left-arrow)); }
+#carousel-right { left:calc(50% + var(--pinned-width) / 2 + var(--carousel-right-arrow)); }
 @media(prefers-reduced-motion:reduce) { .carousel-mode #rack .spine { transition:none; } }
+.setting-label { margin:18px 0 7px;font-size:13px; }
+.setting-toggle { display:flex;gap:0; }
+.setting-toggle button { flex:1;border-radius:0;min-height:42px; }
+.setting-toggle button:first-child { border-radius:5px 0 0 5px; }
+.setting-toggle button:last-child { border-radius:0 5px 5px 0; }
+.setting-toggle button[aria-pressed="true"] { background:var(--gold);border-color:var(--gold);color:#282519; }

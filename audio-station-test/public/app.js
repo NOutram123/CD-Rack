@@ -2,7 +2,7 @@ import { sortRackAlbums } from './rack-sort.js';
 import { estimateSpineColour } from './spine-colour.js';
 import { demoOnly } from './config.js';
 import { createDemoPlayer } from './demo-player.js';
-import { wrapAlbum, carouselNeighbours } from './carousel.js';
+import { wrapAlbum, carouselNeighbours, carouselSpineScale, carouselSwipeSteps } from './carousel.js';
 let demoMode = false;
 let demoPlayer;
 let connectionGeneration = 0;
@@ -55,6 +55,9 @@ let buttons = [];
 let sortedRacks = new Map();
 let activeSort = ['artist', 'album', 'date'].includes(recalled('cd-rack-sort')) ? recalled('cd-rack-sort') : 'artist';
 let displayMode = recalled('cd-rack-view') === 'carousel' ? 'carousel' : 'rack';
+let continuousPlay = recalled('cd-rack-continuous') !== 'no';
+let seenContinuousAdvance = '';
+let pendingContinuousAlbum = '';
 let carouselQueuedSteps = 0;
 let carouselGesture;
 let suppressCarouselClickUntil = 0;
@@ -241,6 +244,8 @@ function resetMode() {
   showLogin('');
   albumTrackCache.clear();
   nowPlayingAlbumId = '';
+  seenContinuousAdvance = '';
+  pendingContinuousAlbum = '';
   device = '';
   busy = false;
   polling = false;
@@ -254,6 +259,8 @@ function updateMode() {
   activeSort = ['artist', 'album', 'date'].includes(recalled('cd-rack-sort')) ? recalled('cd-rack-sort') : 'artist';
   byId('sort-by').value = activeSort;
   displayMode = recalled('cd-rack-view') === 'carousel' ? 'carousel' : 'rack';
+  continuousPlay = recalled('cd-rack-continuous') !== 'no';
+  renderSettingToggles();
 }
 
 async function enterDemo() {
@@ -264,6 +271,7 @@ async function enterDemo() {
   updateMode();
   await loadLibrary();
   device = 'demo-player';
+  await syncContinuousPlay();
   byId('output-label').textContent = 'Demo amplifier - simulated, no sound';
   byId('nas-label').textContent = 'Demo mode - local sample albums. No NAS connection.';
   byId('connection').hidden = true;
@@ -327,6 +335,7 @@ async function openRack() {
   if (!device) return;
   remember('cd-rack-device', device);
   remember('cd-rack-ready', 'yes');
+  await syncContinuousPlay();
   playback = undefined;
   selectedTracks = [];
   trackIds = [];
@@ -394,8 +403,13 @@ async function selectAlbum(index) {
       nowPlayingAlbumId = state.album || match?.[0] || nowPlayingAlbumId;
       const target = rackAlbums.findIndex(album => album.id === nowPlayingAlbumId);
       if (target < 0) { message('Open an album and press Play first.', true); return; }
-      if (selected === target) { buttons[target].scrollIntoView({ block: 'nearest', inline: 'center' }); return; }
-      buttons[target].scrollIntoView({ block: 'nearest', inline: 'center' });
+      if (displayMode === 'carousel') {
+        rack.scrollLeft = 0;
+        if (selected === target) { layoutCarousel(); return; }
+      } else {
+        buttons[target].scrollIntoView({ block: 'nearest', inline: 'center' });
+        if (selected === target) return;
+      }
       return selectAlbum(target);
     } catch (error) { message(error.message, true); return; }
   }
@@ -465,21 +479,28 @@ function layoutCarousel() {
   if (displayMode !== 'carousel') return;
   const count = rackAlbums.length - 2;
   const stage = byId('deck').getBoundingClientRect();
-  const size = Math.max(80, Math.min(stage.width - 132, stage.height - 90));
+  const neighbours = carouselNeighbours(selected - 2, count, 5);
+  const sideWidths = [-1, 1].map(side => neighbours.filter(item => item.side === side)
+    .reduce((sum, item) => sum + carouselSpineScale(item.distance) / 12 * (rackAlbums[item.index + 2].caseStyle === 'fatbox' ? 2.25 : 1), 0));
+  const size = Math.max(40, Math.min((rack.clientWidth - 180) / (1 + 2 * Math.max(...sideWidths)), stage.height - 50));
   byId('deck').style.setProperty('--carousel-cover-size', size + 'px');
-  const neighbours = carouselNeighbours(selected - 2, count, 4);
   const visible = new Set(neighbours.map(item => item.index + 2));
-  buttons.forEach((button, index) => { button.hidden = !visible.has(index); });
+  buttons.forEach((button, index) => { button.hidden = index >= 2 && !visible.has(index); });
   for (const side of [-1, 1]) {
     let edge = size / 2 + 14;
     for (const neighbour of neighbours.filter(item => item.side === side)) {
       const index = neighbour.index + 2;
-      const width = size / 12 * (rackAlbums[index].caseStyle === 'fatbox' ? 2.25 : 1);
+      const width = size / 12 * (rackAlbums[index].caseStyle === 'fatbox' ? 2.25 : 1) * carouselSpineScale(neighbour.distance);
       const x = side * (edge + width / 2);
-      buttons[index].style.transform = `translate(calc(-50% + ${x}px + var(--carousel-drag, 0px)), -50%) rotateY(${side * -18}deg)`;
+      buttons[index].style.width = width + 'px';
+      // Hide lettering once a panel cannot contain the vertical text's width.
+      const panelWidth = rackAlbums[index].caseStyle === 'fatbox' ? width / 2.25 : width;
+      buttons[index].classList.toggle('unlabelled', panelWidth < Math.max(9, Math.min(size / 27, 16)) + 6);
+      buttons[index].style.transform = `translate(calc(-50% + ${x}px), -50%)`;
       buttons[index].style.zIndex = String(10 - neighbour.distance);
       edge += width + 5;
     }
+    byId('deck').style.setProperty(side < 0 ? '--carousel-left-arrow' : '--carousel-right-arrow', (edge + (side < 0 ? 47 : 5)) + 'px');
   }
   byId('carousel-left').disabled = count < 2;
   byId('carousel-right').disabled = count < 2;
@@ -488,10 +509,10 @@ function layoutCarousel() {
 async function applyDisplayMode(preferPlaying = false) {
   const carousel = displayMode === 'carousel';
   document.body.classList.toggle('carousel-mode', carousel);
-  byId('view-mode').value = displayMode;
-  for (const id of ['carousel-tools', 'carousel-left', 'carousel-right']) byId(id).hidden = !carousel;
+  renderSettingToggles();
+  for (const id of ['carousel-left', 'carousel-right']) byId(id).hidden = !carousel;
   if (!carousel) {
-    buttons.forEach(button => { button.hidden = false; button.style.transform = ''; button.style.zIndex = ''; });
+    buttons.forEach(button => { button.hidden = false; button.style.transform = ''; button.style.zIndex = ''; button.style.width = ''; button.classList.remove('unlabelled'); });
     popup.style.left = '';
     positionAlbum();
     if (selected >= 2) buttons[selected].scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -525,14 +546,39 @@ function flushCarouselNavigation() {
   carouselQueuedSteps = 0;
   void moveCarousel(steps);
 }
-byId('view-mode').onchange = async () => {
-  if (volumeDialog.open || busy) { byId('view-mode').value = displayMode; return; }
-  displayMode = byId('view-mode').value === 'carousel' ? 'carousel' : 'rack';
+function renderSettingToggles() {
+  byId('view-rack').setAttribute('aria-pressed', String(displayMode === 'rack'));
+  byId('view-carousel').setAttribute('aria-pressed', String(displayMode === 'carousel'));
+  byId('continuous-yes').setAttribute('aria-pressed', String(continuousPlay));
+  byId('continuous-no').setAttribute('aria-pressed', String(!continuousPlay));
+}
+async function setDisplayMode(mode) {
+  if (volumeDialog.open || busy) return;
+  displayMode = mode;
   remember('cd-rack-view', displayMode);
   await applyDisplayMode(true);
-};
-byId('carousel-settings').onclick = () => { if (!volumeDialog.open) byId('settings').showModal(); };
-byId('carousel-now-playing').onclick = () => selectAlbum(1);
+}
+byId('view-rack').onclick = () => setDisplayMode('rack');
+byId('view-carousel').onclick = () => setDisplayMode('carousel');
+function continuousOptions() {
+  return { enabled: continuousPlay, order: rackAlbums.filter(album => album.playable).map(album => album.id) };
+}
+async function syncContinuousPlay() {
+  if (connected && device) await api('continuous', { player: device, ...continuousOptions() });
+}
+async function setContinuousPlay(enabled) {
+  if (volumeDialog.open || busy) return;
+  const previous = continuousPlay;
+  continuousPlay = enabled;
+  renderSettingToggles();
+  try {
+    await syncContinuousPlay();
+    remember('cd-rack-continuous', enabled ? 'yes' : 'no');
+  } catch (error) { continuousPlay = previous; renderSettingToggles(); message(error.message, true); }
+}
+byId('continuous-yes').onclick = () => setContinuousPlay(true);
+byId('continuous-no').onclick = () => setContinuousPlay(false);
+renderSettingToggles();
 byId('carousel-left').onclick = () => moveCarousel(-1);
 byId('carousel-right').onclick = () => moveCarousel(1);
 
@@ -540,7 +586,7 @@ const deck = byId('deck');
 deck.addEventListener('pointerdown', event => {
   if (displayMode !== 'carousel' || volumeDialog.open || byId('settings').open
       || (event.button !== undefined && event.button !== 0)
-      || event.target.closest('#transport-row, .carousel-arrow')) return;
+      || event.target.closest('#transport-row, .carousel-arrow, #pinned-tools')) return;
   carouselGesture = { x: event.clientX, y: event.clientY, id: event.pointerId, dragging: false };
 });
 deck.addEventListener('pointermove', event => {
@@ -553,21 +599,22 @@ deck.addEventListener('pointermove', event => {
   }
   if (carouselGesture.dragging) {
     event.preventDefault();
-    deck.style.setProperty('--carousel-drag', Math.max(-75, Math.min(75, dx)) + 'px');
   }
 });
 function endCarouselGesture(event) {
   if (!carouselGesture || event.pointerId !== carouselGesture.id) return;
   const gesture = carouselGesture;
   carouselGesture = undefined;
-  deck.style.setProperty('--carousel-drag', '0px');
   if (gesture.dragging) {
     suppressCarouselClickUntil = performance.now() + 350;
-    if (event.type !== 'pointercancel' && Math.abs(event.clientX - gesture.x) > 35) void moveCarousel(event.clientX < gesture.x ? 1 : -1);
+    const steps = carouselSwipeSteps(event.clientX - gesture.x, cover.getBoundingClientRect().width);
+    if (event.type === 'pointerup' && steps) void moveCarousel(steps);
   }
 }
 deck.addEventListener('pointerup', endCarouselGesture);
 deck.addEventListener('pointercancel', endCarouselGesture);
+deck.addEventListener('lostpointercapture', endCarouselGesture);
+deck.addEventListener('dragstart', event => { if (displayMode === 'carousel') event.preventDefault(); });
 
 function closeAlbum(focus = true) {
   if (volumeDialog.open) return;
@@ -659,11 +706,13 @@ function renderRack() {
     } else button.append(mark, title);
     button.addEventListener('click', event => {
       if (displayMode === 'carousel' && performance.now() < suppressCarouselClickUntil) return;
-      if (event.detail < 2 && (!dragged || event.detail === 0)) selectAlbum(index);
+      // Pinned utilities sit outside the draggable shelf and cannot be its drag's click.
+      if (event.detail < 2 && (album.settings || album.nowPlaying || !dragged || event.detail === 0)) selectAlbum(index);
     });
     return button;
   });
-  rack.replaceChildren(...buttons);
+  byId('pinned-tools').replaceChildren(...buttons.slice(0, 2));
+  rack.replaceChildren(...buttons.slice(2));
   colourObserver.disconnect();
   buttons.forEach((button, index) => {
     if (!demoMode && rackAlbums[index].playable && !rackAlbums[index].spineStyle) colourObserver.observe(button);
@@ -671,7 +720,7 @@ function renderRack() {
 }
 
 async function poll() {
-  if (volumeDialog.open || !connected || !rackAlbums[selected]?.playable || !device || polling || !selectedTracks.length) return;
+  if (volumeDialog.open || !connected || !device || polling || byId('library').hidden) return;
   polling = true;
   const version = selectionVersion;
   const requestedDevice = device;
@@ -683,6 +732,10 @@ async function poll() {
     if (result.album) nowPlayingAlbumId = result.album;
     else if (lastPlaying) nowPlayingAlbumId = rackAlbums[selected].id;
     buttons[1].classList.toggle('active-player', Boolean(nowPlayingAlbumId));
+    if (result.continuousAdvance && String(result.continuousAdvance.serial) !== seenContinuousAdvance) {
+      seenContinuousAdvance = String(result.continuousAdvance.serial);
+      pendingContinuousAlbum = result.continuousAdvance.album;
+    }
 
     renderControls();
   } catch (error) {
@@ -692,6 +745,14 @@ async function poll() {
       byId('playback-label').textContent = 'Connection lost';
     }
   } finally { polling = false; renderControls(); }
+  if (pendingContinuousAlbum && !busy && !volumeDialog.open && !byId('settings').open) {
+    const target = rackAlbums.findIndex(album => album.id === pendingContinuousAlbum);
+    pendingContinuousAlbum = '';
+    if (target >= 2 && target !== selected) {
+      if (displayMode === 'rack') buttons[target].scrollIntoView({ block: 'nearest', inline: 'center' });
+      await selectAlbum(target);
+    }
+  }
 }
 
 async function command(action) {
@@ -701,13 +762,14 @@ async function command(action) {
   try {
     if (action === 'toggle') {
       if (!ownsQueue() || playback?.status.state === 'stopped') {
-        await api('play', { album: rackAlbums[selected].id, player: device });
+        await api('play', { album: rackAlbums[selected].id, player: device, continuous: continuousPlay, order: continuousOptions().order });
       } else {
         await api('control', { player: device, action: playback.status.state === 'playing' ? 'pause' : 'play' });
       }
     } else {
       await api('control', { player: device, action });
     }
+    await syncContinuousPlay();
     message('');
     await poll();
   } catch (error) { message(error.message, true); }
@@ -848,6 +910,7 @@ byId('refresh-rack').onclick = async () => {
   try {
     activeSort = requestedSort;
     await loadLibrary(true);
+    await syncContinuousPlay();
     remember('cd-rack-sort', activeSort);
     clearTimeout(scrollTimer);
     remember('cd-rack-place', '0');

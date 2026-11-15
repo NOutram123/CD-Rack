@@ -2,6 +2,30 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemoPlayer } from './public/demo-player.js';
 
+test('continuous demo follows rack order, wraps, and respects No and pause without playing on enable', async () => {
+  let time = 0;
+  const demo = createDemoPlayer([['A', 'Artist'], ['B', 'Artist'], ['C', 'Artist']], () => time);
+  const options = { enabled: true, order: ['demo-0', 'demo-2', 'demo-1'] };
+  await demo.request('continuous', options);
+  assert.equal((await demo.request('state')).status.state, 'stopped');
+  await demo.request('play', { album: 'demo-0' });
+  time += 12 * 30000;
+  assert.equal((await demo.request('state')).album, 'demo-2');
+  time += 8 * 30000;
+  assert.equal((await demo.request('state')).album, 'demo-1');
+  time += 8 * 30000;
+  assert.equal((await demo.request('state')).album, 'demo-0');
+  await demo.request('control', { action: 'pause' });
+  time += 99 * 30000;
+  assert.equal((await demo.request('state')).status.state, 'paused');
+  await demo.request('continuous', { ...options, enabled: false });
+  await demo.request('play', { album: 'demo-1' });
+  time += 8 * 30000;
+  assert.equal((await demo.request('state')).status.state, 'stopped');
+  await demo.request('continuous', options);
+  assert.equal((await demo.request('state')).status.state, 'stopped');
+});
+
 test('demo receiver supports silent playback, disc boundaries, pause and queue replacement', async () => {
   let time = 0;
   const demo = createDemoPlayer([['Triple', 'Example'], ['Single', 'Other']], () => time);

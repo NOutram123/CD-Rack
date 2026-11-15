@@ -1,6 +1,6 @@
 # CD Rack - Home Music
 
-A CD-style music controller for a Synology NAS running Audio Station and a network-connected Denon amplifier. Browse your collection as a rack of jewel cases or a circular carousel of covers and spines. Playback starts only when you press Play.
+A CD-style music controller for a Synology NAS running Audio Station and a network-connected Denon amplifier. Browse your collection as a rack of jewel cases or a circular carousel of covers and spines. Playback begins when you press Play; optional continuous play then advances through albums in rack order.
 
 **[Try the public demo](https://cd-rack-showcase.vercel.app/)** · **[Read the illustrated user guide](docs/CD-Rack-Guide.pdf)**
 
@@ -9,7 +9,9 @@ A CD-style music controller for a Synology NAS running Audio Station and a netwo
 ## What it does
 
 - Rack and Carousel modes with remembered browser preferences.
-- Circular swipe/drag, album arrows and keyboard navigation in Carousel.
+- Stationary swipes advance one to four albums; centred arrows and keyboard navigation in Carousel.
+- Settings and Now Playing remain pinned album spines in both views.
+- Continuous album-by-album playback on the NAS, with remembered Yes/No controls.
 - Multi-disc fatboxes, disc/track ordering and compilation grouping.
 - Audio Station playback and volume control, including mute restoration.
 - Artist, album and date sorting applied by Refresh Rack.
@@ -57,6 +59,6 @@ See [guide build instructions](docs/README.md) to regenerate the PDF, and the [a
 
 ## Connection behaviour
 
-The current home-NAS setup uses HTTP on the LAN; trusted HTTPS/reverse-proxy setup is optional and documented separately. Do not expose the NAS service through router port forwarding. The public HTTPS demo is independent of the NAS. No DSM passwords are stored by the app. Session cookies are HttpOnly/SameSite=Strict; service restarts, app deployments or NAS restarts require a fresh sign-in. Album browsing, refresh and volume changes never start music.
+The current home-NAS setup uses HTTP on the LAN; trusted HTTPS/reverse-proxy setup is optional and documented separately. Do not expose the NAS service through router port forwarding. The public HTTPS demo is independent of the NAS. No DSM passwords are stored by the app. Session cookies are HttpOnly/SameSite=Strict; service restarts, app deployments or NAS restarts require a fresh sign-in. Album browsing, refresh and volume changes never start music. Continuous play advances after a playing album finishes; selecting Yes while stopped does not start playback.
 
 This public source snapshot includes generic host/account examples. Local account catalogues, session data, logs, SSH keys, credentials and private working notes are not part of the repository.

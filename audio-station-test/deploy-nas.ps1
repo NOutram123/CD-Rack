@@ -14,7 +14,7 @@ try {
   $release = (Get-Date -Format 'yyyyMMddHHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
   $archive = Join-Path ([IO.Path]::GetTempPath()) "home-music-$release.tgz"
   try {
-    & tar -czf $archive server.mjs library.mjs session-policy.mjs artwork-thumbnail.mjs package.json public nas
+    & tar -czf $archive server.mjs library.mjs session-policy.mjs artwork-thumbnail.mjs continuous-play.mjs package.json public nas
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the release archive.' }
     $sshOptions = @('-i', $IdentityFile, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10')
     # Legacy SCP works with Synology SSH without requiring the SFTP service.

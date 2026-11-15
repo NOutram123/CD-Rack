@@ -28,8 +28,8 @@
 </section>
 <section id="library" hidden aria-label="CD library">
 <p id="demo-banner" role="status" hidden>Demo mode - simulated playback, no sound</p>
-<nav id="carousel-tools" aria-label="Carousel tools" hidden><button id="carousel-settings">Settings</button><button id="carousel-now-playing">Now Playing</button></nav>
 <div id="deck" aria-label="CD rack">
+<nav id="pinned-tools" aria-label="Settings and now playing albums"></nav>
 <div id="rack" role="group" aria-label="Album spines"></div>
 <button id="carousel-left" class="carousel-arrow" aria-label="Previous album" hidden>‹</button>
 <button id="carousel-right" class="carousel-arrow" aria-label="Next album" hidden>›</button>
@@ -44,7 +44,10 @@
 <p id="message" role="status" aria-live="polite"></p>
 <dialog id="settings" class="settings">
 <div class="settings-heading"><h2>Settings</h2><button id="close-settings" aria-label="Close settings">×</button></div>
-<label for="view-mode">Display mode</label><select id="view-mode"><option value="rack">Rack</option><option value="carousel">Carousel</option></select>
+<p class="setting-label" id="view-mode-label">Display mode</p>
+<div id="view-mode" class="setting-toggle" role="group" aria-labelledby="view-mode-label"><button id="view-rack" type="button" aria-pressed="true">Rack</button><button id="view-carousel" type="button" aria-pressed="false">Carousel</button></div>
+<p class="setting-label" id="continuous-label">Continuous play</p>
+<div id="continuous-play" class="setting-toggle" role="group" aria-labelledby="continuous-label"><button id="continuous-yes" type="button" aria-pressed="true">Yes</button><button id="continuous-no" type="button" aria-pressed="false">No</button></div>
 <label for="display-size">CD size</label><input id="display-size" type="range" min="1" max="3" step="0.25" value="1"><p class="help">Larger CDs show fewer spines while keeping their proportions.</p>
 <label for="sort-by">Sort by</label>
 <div class="sort-row"><select id="sort-by"><option value="artist">Artist name</option><option value="album">Album name</option><option value="date">Album date</option></select><button id="refresh-rack">Refresh Rack</button></div>

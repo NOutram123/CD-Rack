@@ -132,6 +132,50 @@ test('pinned Rack utilities still respond after dragging the album shelf', async
   assert.equal(h.requests.length, 0);
 });
 
+test('track popup highlights playing titles and starts the selected track with active transport in both views', async () => {
+  for (const mode of ['rack', 'carousel']) {
+    const h = await appHarness(true);
+    await h.nodes.get('demo-button').onclick();
+    await h.nodes.get(`view-${mode}`).onclick();
+    await h.run('selectAlbum(2)');
+    await h.run("command('toggle')");
+    await h.run("command('next')");
+    await new Promise(setImmediate);
+    const before = await h.run("api('state')");
+    await h.nodes.get('open-tracks').onclick({ stopPropagation() {} });
+    assert.equal(h.nodes.get('tracks-dialog').open, true);
+    const list = h.nodes.get('track-list');
+    assert.equal(list.children.length, h.run('selectedTracks.length'));
+    assert.equal(list.children[1].children[0].attributes['aria-current'], 'true');
+    assert.equal(list.children[0].children[0].attributes['aria-current'], undefined);
+    assert.deepEqual(await h.run("api('state')"), before, 'opening the list must not change playback');
+    const selected = h.run('selected');
+    await h.run("selectAlbum(3); command('next')");
+    assert.equal(h.run('selected'), selected, 'modal blocks album changes');
+    assert.deepEqual(await h.run("api('state')"), before, 'modal blocks underlying transport');
+    await list.children[4].children[0].onclick();
+    assert.equal(h.nodes.get('tracks-dialog').open, false);
+    const playing = await h.run("api('state')");
+    assert.equal(playing.status.index, 4);
+    assert.equal(playing.status.state, 'playing');
+    assert.equal(playing.queue.songs.length, before.queue.songs.length, 'the full album queue is preserved');
+    assert.equal(h.nodes.get('toggle').textContent, 'Pause');
+    assert.equal(h.nodes.get('toggle').attributes['aria-pressed'], 'true');
+    assert.equal(h.nodes.get('toggle').disabled, false);
+    await h.nodes.get('open-tracks').onclick({ stopPropagation() {} });
+    assert.equal(list.children[4].children[0].attributes['aria-current'], 'true');
+    await h.nodes.get('close-tracks').onclick({ stopPropagation() {} });
+    await h.run('selectAlbum(3)');
+    await h.nodes.get('open-tracks').onclick({ stopPropagation() {} });
+    assert.ok(list.children.every(row => !row.children[0].attributes['aria-current']), 'another album must not inherit the current track highlight');
+    h.nodes.get('tracks-dialog').handlers.cancel({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(h.nodes.get('tracks-dialog').open, false);
+    assert.equal(h.nodes.get('open-tracks').attributes['aria-expanded'], 'false');
+    assert.deepEqual(await h.run("api('state')"), playing, 'dismissing leaves playback untouched');
+    assert.equal(h.requests.length, 0, 'demo track browsing and playback never contact the NAS');
+  }
+});
+
 test('an empty NAS rack retains Settings and Now Playing without synthetic albums', async () => {
   const h = await appHarness(false);
   assert.equal(h.nodes.get('library').hidden, false);

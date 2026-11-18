@@ -81,6 +81,21 @@ dialog.settings { margin:auto; }
 .sort-row button { flex:none;padding-inline:10px; }
 #volume-trigger { flex:none;margin-left:5px;padding-left:6px;border-left:1px solid #676957; }
 #open-volume { width:29px;min-height:30px;padding:0;font-size:12px; }
+#open-tracks { width:29px;min-height:30px;padding:0;font-size:12px; }
+#volume-trigger { display:flex;gap:3px; }
+#controls #toggle[aria-pressed="true"] { background:var(--gold);border-color:var(--gold); }
+#tracks-dialog { position:fixed;inset:auto;margin:0;padding:10px 12px;flex-direction:column;overflow:hidden;border-color:#777c67;box-shadow:0 5px 22px #000b; }
+#tracks-dialog[open] { display:flex; }
+#tracks-dialog::backdrop { background:transparent; }
+.tracks-heading { display:flex;align-items:center;justify-content:space-between;gap:8px;flex:none; }
+.tracks-heading h2 { font-size:14px;margin:0; }
+#close-tracks { width:44px;height:44px;padding:0;border:0;background:transparent;font-size:22px; }
+#tracks-status { font-size:13px;margin:8px 0; }
+#tracks-status:empty { display:none; }
+#track-list { list-style:none;margin:0;padding:0;min-height:0;overflow-y:auto;overscroll-behavior:contain; }
+#track-list button { width:100%;min-height:40px;padding:9px 8px;text-align:left;font-size:13px;line-height:1.4;overflow-wrap:anywhere;border:0;border-bottom:1px solid var(--border);border-radius:0;background:transparent; }
+#track-list button:hover { background:#41453a; }
+#track-list button.current-track { background:var(--gold);color:#282519; }
 #volume-shade { position:absolute;top:0;left:0;width:100%;aspect-ratio:1;pointer-events:none;background:#0007;z-index:3; }
 #volume-dialog { position:fixed;inset:auto;margin:0;width:184px;max-width:calc(100vw - 16px);padding:8px 12px 12px;border-color:#777c67;border-radius:7px;box-shadow:0 5px 22px #000b; }
 #volume-dialog::backdrop { background:transparent; }

@@ -132,6 +132,16 @@ test('Audio Station album playback replaces duplicate queues and keeps track con
     const activity = JSON.stringify((await call('trace')).data);
     assert.ok(!activity.includes('dummy') && !activity.includes('test-session-only'));
     assert.equal((await call('control', { player: 'denon-test', action: 'play' }, 'https://unrelated.example')).status, 403);
+    const beforeSelectedTrack = replacementCalls;
+    assert.equal((await call('play', { ...play, startIndex: 1 })).status, 200);
+    assert.equal(current, 1, 'track selection starts at the requested album index');
+    assert.equal(playback, 'playing');
+    assert.deepEqual(queue, ['music_1', 'music_2'], 'track selection retains the ordered full album queue');
+    assert.equal(replacementCalls, beforeSelectedTrack + 1);
+    for (const startIndex of [-1, 2, 1.5, '1']) {
+      assert.equal((await call('play', { ...play, startIndex })).status, 400);
+      assert.equal(replacementCalls, beforeSelectedTrack + 1, 'invalid indices never change the queue');
+    }
     // NAS-side continuation advances with no browser state polling at all.
     songs.push(...[3, 4].map(index => ({ id: `music_${index}`, title: `Track ${index}`, path: `/volume1/music/Test Artist/Second Album/${index}.flac`, additional: { song_audio: { duration: 30 }, song_tag: { album: 'Second Album', album_artist: 'Test Artist', track: index - 2, disc: 1 } } })));
     const all = (await call('albums', { refresh: true })).data;
@@ -140,8 +150,15 @@ test('Audio Station album playback replaces duplicate queues and keeps track con
     playback = 'stopped';
     assert.equal((await call('continuous', config)).status, 200);
     assert.equal(playback, 'stopped', 'enabling never starts a stopped receiver');
+    const beforeAttach = replacementCalls;
     playback = 'playing'; current = 1; position = 29;
     assert.equal((await call('continuous', config)).status, 200);
+    playback = 'stopped';
+    await delay(2100);
+    assert.equal(replacementCalls, beforeAttach, 'opening a rack or enabling continuation never adopts existing playback');
+    await call('play', { ...play, continuous: true, order: config.order });
+    current = 1; position = 29;
+    await delay(2100);
     playback = 'stopped'; position = 0;
     const beforeAdvance = replacementCalls;
     for (let i = 0; i < 120 && (replacementCalls === beforeAdvance || playback !== 'playing'); i++) await delay(50);

@@ -156,6 +156,9 @@ const byId = id => document.getElementById(id);
 const rack = byId('rack');
 const popup = byId('album');
 const volumeDialog = byId('volume-dialog');
+const tracksDialog = byId('tracks-dialog');
+let tracksGeneration = 0;
+const albumDialogOpen = () => volumeDialog.open || tracksDialog.open;
 let volumeBusy = false;
 let volumeRead = null;
 let volumeState;
@@ -363,6 +366,7 @@ function renderControls() {
   byId('controls').hidden = !live;
   byId('volume-trigger').hidden = !live;
   byId('open-volume').disabled = busy || !connected || !device;
+  byId('open-tracks').disabled = busy || !connected || !device;
   if (!live) {
     byId('track').textContent = 'Artwork preview';
     return;
@@ -371,6 +375,7 @@ function renderControls() {
   const index = Number(playback?.status.index ?? playback?.queue.current ?? -1);
   const playing = loaded && playback?.status.state === 'playing';
   byId('toggle').textContent = playing ? 'Pause' : 'Play';
+  byId('toggle').setAttribute('aria-pressed', String(playing));
   byId('toggle').disabled = busy || !connected || !device || !selectedTracks.length;
   byId('previous').disabled = busy || !loaded || index <= 0;
   byId('next').disabled = busy || !loaded || index < 0 || index >= selectedTracks.length - 1;
@@ -393,7 +398,7 @@ function positionAlbum() {
 }
 
 async function selectAlbum(index) {
-  if (volumeDialog.open || busy || index === selected) return;
+  if (albumDialogOpen() || busy || index === selected) return;
   if (rackAlbums[index].settings) { byId('settings').showModal(); return; }
   if (rackAlbums[index].nowPlaying) {
     try {
@@ -536,7 +541,7 @@ async function applyDisplayMode(preferPlaying = false) {
 }
 
 async function moveCarousel(step) {
-  if (displayMode !== 'carousel' || volumeDialog.open || byId('settings').open || rackAlbums.length < 4) return;
+  if (displayMode !== 'carousel' || albumDialogOpen() || byId('settings').open || rackAlbums.length < 4) return;
   if (busy) { carouselQueuedSteps += step; return; }
   await selectAlbum(wrapAlbum(selected - 2 + step, rackAlbums.length - 2) + 2);
 }
@@ -553,7 +558,7 @@ function renderSettingToggles() {
   byId('continuous-no').setAttribute('aria-pressed', String(!continuousPlay));
 }
 async function setDisplayMode(mode) {
-  if (volumeDialog.open || busy) return;
+  if (albumDialogOpen() || busy) return;
   displayMode = mode;
   remember('cd-rack-view', displayMode);
   await applyDisplayMode(true);
@@ -567,7 +572,7 @@ async function syncContinuousPlay() {
   if (connected && device) await api('continuous', { player: device, ...continuousOptions() });
 }
 async function setContinuousPlay(enabled) {
-  if (volumeDialog.open || busy) return;
+  if (albumDialogOpen() || busy) return;
   const previous = continuousPlay;
   continuousPlay = enabled;
   renderSettingToggles();
@@ -584,7 +589,7 @@ byId('carousel-right').onclick = () => moveCarousel(1);
 
 const deck = byId('deck');
 deck.addEventListener('pointerdown', event => {
-  if (displayMode !== 'carousel' || volumeDialog.open || byId('settings').open
+  if (displayMode !== 'carousel' || albumDialogOpen() || byId('settings').open
       || (event.button !== undefined && event.button !== 0)
       || event.target.closest('#transport-row, .carousel-arrow, #pinned-tools')) return;
   carouselGesture = { x: event.clientX, y: event.clientY, id: event.pointerId, dragging: false };
@@ -617,7 +622,7 @@ deck.addEventListener('lostpointercapture', endCarouselGesture);
 deck.addEventListener('dragstart', event => { if (displayMode === 'carousel') event.preventDefault(); });
 
 function closeAlbum(focus = true) {
-  if (volumeDialog.open) return;
+  if (albumDialogOpen()) return;
   if (selected < 0) return;
   const previous = selected;
   buttons[previous].setAttribute('aria-pressed', 'false');
@@ -720,7 +725,7 @@ function renderRack() {
 }
 
 async function poll() {
-  if (volumeDialog.open || !connected || !device || polling || byId('library').hidden) return;
+  if (albumDialogOpen() || !connected || !device || polling || byId('library').hidden) return;
   polling = true;
   const version = selectionVersion;
   const requestedDevice = device;
@@ -745,7 +750,7 @@ async function poll() {
       byId('playback-label').textContent = 'Connection lost';
     }
   } finally { polling = false; renderControls(); }
-  if (pendingContinuousAlbum && !busy && !volumeDialog.open && !byId('settings').open) {
+  if (pendingContinuousAlbum && !busy && !albumDialogOpen() && !byId('settings').open) {
     const target = rackAlbums.findIndex(album => album.id === pendingContinuousAlbum);
     pendingContinuousAlbum = '';
     if (target >= 2 && target !== selected) {
@@ -756,7 +761,7 @@ async function poll() {
 }
 
 async function command(action) {
-  if (volumeDialog.open || busy || !rackAlbums[selected]?.playable || !connected || !selectedTracks.length) return;
+  if (albumDialogOpen() || busy || !rackAlbums[selected]?.playable || !connected || !selectedTracks.length) return;
   busy = true;
   renderControls();
   try {
@@ -764,10 +769,12 @@ async function command(action) {
       if (!ownsQueue() || playback?.status.state === 'stopped') {
         await api('play', { album: rackAlbums[selected].id, player: device, continuous: continuousPlay, order: continuousOptions().order });
       } else {
-        await api('control', { player: device, action: playback.status.state === 'playing' ? 'pause' : 'play' });
+        await api('control', { player: device, action: playback.status.state === 'playing' ? 'pause' : 'play',
+          album: rackAlbums[selected].id, continuous: continuousPlay, order: continuousOptions().order });
       }
     } else {
-      await api('control', { player: device, action });
+      await api('control', { player: device, action, album: rackAlbums[selected].id,
+        continuous: continuousPlay, order: continuousOptions().order });
     }
     await syncContinuousPlay();
     message('');
@@ -775,6 +782,99 @@ async function command(action) {
   } catch (error) { message(error.message, true); }
   finally { busy = false; renderControls(); flushCarouselNavigation(); }
 }
+function positionTracks() {
+  if (!tracksDialog.open) return;
+  const bounds = cover.getBoundingClientRect();
+  tracksDialog.style.width = Math.max(160, Math.min(380, bounds.width - 24, innerWidth - 16)) + 'px';
+  tracksDialog.style.maxHeight = Math.min(innerHeight - 16, Math.max(160, bounds.height - 24)) + 'px';
+  tracksDialog.style.left = Math.max(8, Math.min(bounds.left + bounds.width / 2 - tracksDialog.offsetWidth / 2, innerWidth - tracksDialog.offsetWidth - 8)) + 'px';
+  tracksDialog.style.top = Math.max(8, Math.min(bounds.top + bounds.height / 2 - tracksDialog.offsetHeight / 2, innerHeight - tracksDialog.offsetHeight - 8)) + 'px';
+}
+function highlightTrack(state) {
+  const index = Number(state?.status.index ?? state?.queue.current ?? -1);
+  const song = state?.status.song?.id ? state.status.song : state?.queue.songs?.[index];
+  const playingId = state?.status.state === 'playing' ? song?.id : undefined;
+  for (const [index, row] of [...byId('track-list').children].entries()) {
+    const button = row.children[0];
+    const current = Boolean(playingId && selectedTracks[index]?.id === playingId);
+    button.classList.toggle('current-track', current);
+    if (current) button.setAttribute('aria-current', 'true');
+    else button.removeAttribute('aria-current');
+  }
+}
+async function playAlbumTrack(index) {
+  if (!tracksDialog.open || busy || !selectedTracks[index] || !connected) return;
+  busy = true;
+  tracksDialog.close();
+  renderControls();
+  try {
+    await api('play', { album: rackAlbums[selected].id, player: device, startIndex: index,
+      continuous: continuousPlay, order: continuousOptions().order });
+    message('');
+    await poll();
+  } catch (error) { message(error.message, true); }
+  finally { busy = false; renderControls(); flushCarouselNavigation(); }
+}
+let trackStateReading = false;
+async function refreshTrackHighlight() {
+  if (!tracksDialog.open || trackStateReading) return;
+  const generation = tracksGeneration;
+  trackStateReading = true;
+  try {
+    const state = await api('state', { player: device });
+    if (tracksDialog.open && generation === tracksGeneration) highlightTrack(state);
+  } catch { /* Keep the list usable during a temporary receiver read failure. */ }
+  finally { trackStateReading = false; }
+}
+byId('open-tracks').onclick = async event => {
+  event.stopPropagation();
+  if (busy || !connected || !device || albumDialogOpen() || !rackAlbums[selected]?.playable) return;
+  const generation = ++tracksGeneration;
+  const version = selectionVersion;
+  const album = rackAlbums[selected].id;
+  byId('track-list').replaceChildren();
+  byId('tracks-status').textContent = 'Loading tracks…';
+  byId('open-tracks').setAttribute('aria-expanded', 'true');
+  byId('volume-shade').hidden = false;
+  tracksDialog.showModal();
+  positionTracks();
+  byId('close-tracks').focus({ preventScroll: true });
+  try {
+    const [tracks, state] = await Promise.all([api('tracks', { album }), api('state', { player: device }).catch(() => null)]);
+    if (!tracksDialog.open || generation !== tracksGeneration || version !== selectionVersion || !connected) return;
+    albumTrackCache.set(album, tracks);
+    selectedTracks = tracks;
+    trackIds = tracks.map(track => track.id);
+    byId('track-list').replaceChildren(...tracks.map((track, index) => {
+      const row = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `${index + 1}. ${track.title}`;
+      button.onclick = () => playAlbumTrack(index);
+      row.append(button);
+      return row;
+    }));
+    byId('tracks-status').textContent = tracks.length ? '' : 'This album has no tracks.';
+    highlightTrack(state);
+    renderControls();
+    positionTracks();
+  } catch (error) {
+    if (tracksDialog.open && generation === tracksGeneration) byId('tracks-status').textContent = error.message;
+  }
+};
+byId('close-tracks').onclick = event => { event.stopPropagation(); tracksDialog.close(); };
+tracksDialog.addEventListener('close', () => {
+  tracksGeneration++;
+  byId('volume-shade').hidden = volumeDialog.open ? false : true;
+  byId('open-tracks').setAttribute('aria-expanded', 'false');
+  tapTime = 0;
+});
+tracksDialog.addEventListener('cancel', event => { event.preventDefault(); event.stopPropagation(); tracksDialog.close(); });
+for (const name of ['click', 'dblclick', 'keydown']) tracksDialog.addEventListener(name, event => event.stopPropagation());
+setInterval(() => { if (tracksDialog.open) void refreshTrackHighlight(); }, 2500);
+addEventListener('resize', positionTracks);
+window.visualViewport?.addEventListener('resize', positionTracks);
+
 function positionVolume() {
   if (!volumeDialog.open) return;
   const bounds = cover.getBoundingClientRect();
@@ -823,7 +923,7 @@ async function volumeRequest(action) {
 }
 byId('open-volume').onclick = async event => {
   event.stopPropagation();
-  if (busy || !connected || !device || volumeDialog.open) return;
+  if (busy || !connected || !device || albumDialogOpen()) return;
   volumeGeneration++;
   volumeState = undefined;
   byId('volume-error').textContent = '';
@@ -886,7 +986,7 @@ cover.addEventListener('click', event => {
   tapTime = now;
 });
 document.addEventListener('keydown', event => {
-  if (volumeDialog.open || byId('settings').open) return;
+  if (albumDialogOpen() || byId('settings').open) return;
   if (displayMode === 'carousel' && !byId('library').hidden && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
     event.preventDefault(); void moveCarousel(event.key === 'ArrowLeft' ? -1 : 1);
   } else if (event.key === 'Escape' && displayMode !== 'carousel') closeAlbum();

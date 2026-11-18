@@ -14,6 +14,7 @@ A CD-style music controller for a Synology NAS running Audio Station and a netwo
 - Continuous album-by-album playback on the NAS, with remembered Yes/No controls.
 - Multi-disc fatboxes, disc/track ordering and compilation grouping.
 - Audio Station playback and volume control, including mute restoration.
+- A T button opens album tracks over the artwork, highlights the playing track, and starts playback from a selected title.
 - Artist, album and date sorting applied by Refresh Rack.
 - Persistent catalogue/spine-colour caches and 512-pixel cover thumbnails.
 - 30-day app sessions, persistent cookies and read-only NAS keepalive checks.

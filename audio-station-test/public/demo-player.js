@@ -41,10 +41,12 @@ export function createDemoPlayer(examples, now = Date.now) {
       if (endpoint === 'play') {
         const album = albums.find(album => album.id === data.album);
         if (!album) throw Error('Demo album not found.');
+        const startIndex = data.startIndex ?? 0;
+        if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= album.trackCount) throw Error('Select a track from this album.');
         if (data.continuous !== undefined) continuous = data.continuous;
         if (data.order) order = data.order.filter(id => albums.some(album => album.id === id));
         advance = undefined;
-        queue = tracks(album); albumId = album.id; index = 0; state = 'playing'; started = now();
+        queue = tracks(album); albumId = album.id; index = startIndex; state = 'playing'; started = now();
         return snapshot();
       }
       if (endpoint === 'control') {

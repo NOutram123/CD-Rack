@@ -2,6 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemoPlayer } from './public/demo-player.js';
 
+test('synthetic demo titles support starting at a chosen track and reject invalid indices', async () => {
+  const demo = createDemoPlayer([['Album', 'Artist']]);
+  const tracks = await demo.request('tracks', { album: 'demo-0' });
+  assert.equal(tracks.length, 12);
+  assert.ok(tracks.every(track => track.title));
+  const state = await demo.request('play', { album: 'demo-0', startIndex: 5 });
+  assert.equal(state.status.index, 5);
+  assert.equal(state.status.song.id, tracks[5].id);
+  assert.equal(state.status.state, 'playing');
+  for (const startIndex of [-1, 12, '1', 1.5]) await assert.rejects(demo.request('play', { album: 'demo-0', startIndex }));
+  assert.equal((await demo.request('state')).status.index, 5);
+});
+
 test('continuous demo follows rack order, wraps, and respects No and pause without playing on enable', async () => {
   let time = 0;
   const demo = createDemoPlayer([['A', 'Artist'], ['B', 'Artist'], ['C', 'Artist']], () => time);

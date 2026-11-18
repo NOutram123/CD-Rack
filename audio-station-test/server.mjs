@@ -105,12 +105,23 @@ async function discover() {
 }
 
 function validateNas(address) {
-  const url = new URL(address);
+  let url;
+  try { url = new URL(address); } catch { throw new ApiError('Enter a local NAS address including http:// and the DSM port, usually 5000.'); }
   const host = url.hostname.toLowerCase();
   const local = /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host.endsWith('.local') || /^[a-z0-9_-]+$/.test(host);
   if (!local || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
     throw new ApiError('Enter a local NAS address, such as http://YourNASName.local:5000.');
   }
+  return url.origin;
+}
+
+function nasApiAddress(address) {
+  const url = new URL(address);
+  // DSM advertises mDNS to LAN clients but its Node resolver need not resolve it.
+  // Only rewrite this NAS's own HTTP hostname; remote NASes and HTTPS retain their
+  // supplied host and certificate checks. Loopback also survives DHCP changes.
+  const ownNames = [hostname().toLowerCase(), `${hostname().toLowerCase()}.local`, ...localAddresses()];
+  if (nasLocal && url.protocol === 'http:' && ownNames.includes(url.hostname.toLowerCase())) url.hostname = '127.0.0.1';
   return url.origin;
 }
 
@@ -129,6 +140,10 @@ async function request(session, api, method, params = {}, authenticated = true) 
   } catch {
     trace(session, api, method, 'Connection failed');
     throw new ApiError('NAS request failed. A playback command may already have taken effect. Check Audio Station before retrying. Rediscover and sign in if its address changed.', 502);
+  }
+  if (!result || typeof result !== 'object' || typeof result.success !== 'boolean') {
+    trace(session, api, method, 'Invalid API response');
+    throw new ApiError(`Audio Station returned an invalid response to ${method}. Check that Audio Station and the selected output are available.`, 502);
   }
   trace(session, api, method, result.success ? 'Success' : `API error ${result.error?.code}`);
   if (!result.success) {
@@ -264,9 +279,10 @@ async function playbackState(session, id) {
   return { status, queue, album: album?.id || null };
 }
 
-async function startAlbum(session, player, album) {
+async function startAlbum(session, player, album, startIndex = 0) {
   const tracks = await tracksFor(session, album);
   if (!tracks.length) throw new ApiError('This album has no tracks.');
+  if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= tracks.length) throw new ApiError('Select a track from this album.');
   const status = await request(session, 'SYNO.AudioStation.RemotePlayer', 'getstatus', { id: player });
   // Some versions report the requested page size as getplaylist.total.
   // Use the renderer's full count, with a full-list fallback for older APIs.
@@ -280,7 +296,12 @@ async function startAlbum(session, player, album) {
     id: player, library: 'all', offset: 0, limit: total, updated_index: -1,
     songs: tracks.map(song => song.id).join(','), containers_json: '[]', play: 'false',
   });
-  await request(session, 'SYNO.AudioStation.RemotePlayer', 'control', { id: player, action: 'play', value: 0 });
+  const confirmed = await request(session, 'SYNO.AudioStation.RemotePlayer', 'getplaylist', { id: player, offset: 0, limit: tracks.length });
+  if (!Array.isArray(confirmed.songs) || confirmed.songs.length !== tracks.length
+      || !confirmed.songs.every((song, index) => song.id === tracks[index].id)) {
+    throw new ApiError('Audio Station did not confirm the selected album queue. Playback was not started.', 502);
+  }
+  await request(session, 'SYNO.AudioStation.RemotePlayer', 'control', { id: player, action: 'play', value: startIndex });
   return tracks;
 }
 
@@ -299,10 +320,8 @@ async function configureContinuous(session, player, enabled, order) {
     const ordered = continuousOrder(session, order);
     const existing = continuousPlayers.get(key);
     if (existing?.session === session) { existing.order = ordered; return; }
-    const state = await playbackState(session, player);
-    // Enabling is a preference change, never a command to start a stopped player.
-    if (state.status.state !== 'playing' || !ordered.includes(state.album)) return;
-    continuousPlayers.set(key, { session, player, order: ordered, album: state.album, previous: completionSample(state) });
+    // A preference change or rack opening never adopts an existing receiver queue.
+    // Only an explicit Play/track command may arm album continuation.
   } finally { playerLocks.delete(key); }
 }
 
@@ -330,7 +349,7 @@ async function advanceContinuousPlayers() {
         continuousPlayers.set(key, plan);
       } else {
         plan.previous = current;
-        if (['stopped', 'stop'].includes(current.state)) continuousPlayers.delete(key);
+        if (['stopped', 'stop', 'pause', 'paused'].includes(current.state)) continuousPlayers.delete(key);
       }
     } catch {
       continuousPlayers.delete(key);
@@ -403,10 +422,17 @@ async function route(req, res) {
   if (url.pathname === '/api/discover') return reply(res, 200, await discover());
   if (url.pathname === '/api/login') {
     const address = validateNas(body.address);
-    const response = await fetch(`${address}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=SYNO.API.Auth,SYNO.AudioStation.Album,SYNO.AudioStation.Song,SYNO.AudioStation.RemotePlayer`, { signal: AbortSignal.timeout(6000), redirect: 'error' });
-    const discovery = await response.json();
+    const apiAddress = nasApiAddress(address);
+    let discovery;
+    try {
+      const response = await fetch(`${apiAddress}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=SYNO.API.Auth,SYNO.AudioStation.Album,SYNO.AudioStation.Song,SYNO.AudioStation.RemotePlayer`, { signal: AbortSignal.timeout(6000), redirect: 'error' });
+      if (!response.ok) throw Error('NAS API discovery failed');
+      discovery = await response.json();
+    } catch {
+      throw new ApiError('Could not reach the Audio Station login service. Check the NAS address and DSM port (usually 5000 for HTTP or 5001 for HTTPS), then try Find NAS.', 502);
+    }
     if (!discovery.success) throw new ApiError('Could not discover the NAS APIs.');
-    const session = { address, account: String(body.account), apis: discovery.data, trace: [], used: Date.now() };
+    const session = { address: apiAddress, account: String(body.account), apis: discovery.data, trace: [], used: Date.now() };
     const auth = await request(session, 'SYNO.API.Auth', 'login', {
       account: body.account, passwd: body.password, otp_code: body.otp || '', session: 'AudioStation', format: 'sid',
     }, false);
@@ -458,10 +484,11 @@ async function route(req, res) {
     if (url.pathname === '/api/play') {
       const order = body.continuous === true ? continuousOrder(session, body.order) : [];
       continuousPlayers.delete(lock);
-      const tracks = await startAlbum(session, body.player, body.album);
+      const startIndex = body.startIndex ?? 0;
+      const tracks = await startAlbum(session, body.player, body.album, startIndex);
       if (body.continuous === true) {
         continuousPlayers.set(lock, { session, player: body.player, album: body.album, order,
-          previous: completionSample({ status: { state: 'playing', index: 0, position: 0, song: tracks[0] }, queue: { songs: tracks } }) });
+          previous: completionSample({ status: { state: 'playing', index: startIndex, position: 0, song: tracks[startIndex] }, queue: { songs: tracks } }) });
       }
     } else {
       if (!['play', 'pause', 'prev', 'next'].includes(body.action)) throw new ApiError('Unsupported playback action.');
@@ -470,16 +497,36 @@ async function route(req, res) {
         const index = Number(status.index ?? queue.current);
         if (!Number.isInteger(index) || index < 0 || (body.action === 'prev' && index === 0) || (body.action === 'next' && index >= queue.total - 1)) throw new ApiError('You have reached the end of this album.');
       }
+      if (body.action === 'pause') continuousPlayers.delete(lock);
       await request(session, 'SYNO.AudioStation.RemotePlayer', 'control', { id: body.player, action: body.action });
       const plan = continuousPlayers.get(lock);
       if (plan) plan.previous = { ...plan.previous, state: 'command' };
+      if (body.action !== 'pause' && body.continuous === true && body.album) {
+        const order = continuousOrder(session, body.order);
+        const tracks = await tracksFor(session, body.album);
+        const state = await playbackState(session, body.player);
+        if (state.status.state === 'playing' && state.queue.songs?.length === tracks.length
+            && state.queue.songs.every((song, index) => song.id === tracks[index].id)) {
+          continuousPlayers.set(lock, { session, player: body.player, album: body.album, order, previous: completionSample(state) });
+        }
+      }
     }
     return reply(res, 200, { success: true });
   } finally { playerLocks.delete(lock); }
 }
 
 const server = http.createServer((req, res) => {
-  route(req, res).catch(error => reply(res, error.status || 500, { error: error.status ? error.message : 'Could not connect to the NAS. Check the address and connection.' }));
+  route(req, res).catch(error => {
+    const endpoint = String(req.url || '').split('?')[0];
+    const reference = randomBytes(4).toString('hex');
+    // Never log request bodies, cookies, credentials, API results or error messages
+    // (JSON parse errors can include part of the offending request body).
+    if (!error.status || error.status >= 500) console.error(JSON.stringify({ time: new Date().toISOString(), event: 'request-failed', endpoint,
+      reference, type: error.name, code: error.code || error.cause?.code,
+      frames: String(error.stack || '').split('\n').filter(line => /^\s+at /.test(line)).slice(0, 4) }));
+    const operations = { '/api/login': 'signing in', '/api/players': 'finding output devices', '/api/albums': 'loading the album catalogue', '/api/continuous': 'preparing continuous play', '/api/state': 'reading receiver status' };
+    reply(res, error.status || 500, { error: error.status ? error.message : `An internal error occurred while ${operations[endpoint] || 'handling this request'}. Reference: ${reference}.` });
+  });
 });
 server.listen(port, bindAddress, () => console.log(`Home Music is listening on ${bindAddress}:${port}${fixedOrigin ? ` (${origin})` : ''}`));
 process.on('SIGTERM', () => {
@@ -488,7 +535,7 @@ process.on('SIGTERM', () => {
   setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 5000).unref();
 });
 setInterval(() => {
-  void maintainSessions(sessions, session => request(session, 'SYNO.AudioStation.RemotePlayer', 'list', { type: 'all' }));
+  void maintainSessions(sessions, session => request(session, 'SYNO.AudioStation.Song', 'list', { library: 'all', offset: 0, limit: 1 }));
 }, 60000).unref();
 
 setInterval(() => { void advanceContinuousPlayers(); }, 2000).unref();

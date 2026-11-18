@@ -35,7 +35,7 @@
 <button id="carousel-right" class="carousel-arrow" aria-label="Next album" hidden>›</button>
 <section id="album" hidden aria-label="Selected CD">
 <button id="cover" aria-label="Album cover. Double-tap to return to the rack"><canvas id="art" width="640" height="640" role="img" aria-label="Album artwork"></canvas><img id="real-art" alt="" hidden><span id="artwork-loading" role="status" hidden>Loading artwork…</span></button>
-<div id="transport-row"><span id="track" role="status" aria-live="polite"></span><div id="controls"><button id="previous" aria-label="Previous track" disabled>⏮</button><button id="toggle" disabled>Play</button><button id="next" aria-label="Next track" disabled>⏭</button></div><div id="volume-trigger"><button id="open-volume" aria-label="Open amplifier volume" aria-haspopup="dialog" aria-expanded="false">V</button></div></div>
+<div id="transport-row"><span id="track" role="status" aria-live="polite"></span><div id="controls"><button id="previous" aria-label="Previous track" disabled>⏮</button><button id="toggle" aria-pressed="false" disabled>Play</button><button id="next" aria-label="Next track" disabled>⏭</button></div><div id="volume-trigger"><button id="open-tracks" aria-label="Open album tracks" aria-haspopup="dialog" aria-expanded="false">T</button><button id="open-volume" aria-label="Open amplifier volume" aria-haspopup="dialog" aria-expanded="false">V</button></div></div>
 <div id="volume-shade" hidden aria-hidden="true"></div>
 </section>
 </div>
@@ -62,6 +62,10 @@
 <div class="volume-heading"><span id="volume-name">Volume</span><button id="close-volume" aria-label="Close volume">×</button></div>
 <div class="volume-row"><button id="volume-down" aria-label="Volume down" disabled>−</button><output id="volume-level" aria-label="Current volume" aria-live="polite">…</output><button id="volume-up" aria-label="Volume up" disabled>+</button></div>
 <button id="volume-mute" aria-pressed="false" disabled>Mute</button><p id="volume-error" role="status" aria-live="polite"></p>
+</dialog>
+<dialog id="tracks-dialog" aria-labelledby="tracks-heading">
+<div class="tracks-heading"><h2 id="tracks-heading">Album tracks</h2><button id="close-tracks" aria-label="Close album tracks">×</button></div>
+<p id="tracks-status" role="status" aria-live="polite"></p><ol id="track-list"></ol>
 </dialog>
 </main>
 </body>

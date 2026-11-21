@@ -5,7 +5,7 @@ import { readFile, realpath, mkdir, writeFile, rename, stat } from 'node:fs/prom
 import path from 'node:path';
 import { buildAlbums, albumDate } from './library.mjs';
 import { readableText } from './public/spine-colour.js';
-import { hostname, networkInterfaces } from 'node:os';
+import { homedir, hostname, networkInterfaces } from 'node:os';
 import { sessionCookie, sessionExpired, maintainSessions } from './session-policy.mjs';
 import { artworkThumbnail } from './artwork-thumbnail.mjs';
 import { completionSample, albumFinished } from './continuous-play.mjs';
@@ -167,7 +167,7 @@ async function allItems(session, api, key, params = {}) {
 
 async function loadAlbums(session, refresh = false) {
   const key = createHash('sha256').update(JSON.stringify([nasLocal ? 'local' : session.address, session.account])).digest('hex');
-  const directory = process.env.CATALOGUE_DIR || (nasLocal ? path.join(process.env.HOME, 'home-music', 'catalogue') : '');
+  const directory = process.env.CATALOGUE_DIR || (nasLocal ? path.join(homedir(), 'home-music', 'catalogue') : '');
   session.catalogueKey = key;
   session.catalogueDirectory = directory;
   let cached = catalogues.get(key);

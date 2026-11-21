@@ -14,6 +14,7 @@ test('NAS-local hostname login uses loopback for discovery and authenticated req
       res.end(JSON.stringify({ success: true, data: {
         'SYNO.API.Auth': { path: 'entry.cgi', maxVersion: 6 },
         'SYNO.AudioStation.RemotePlayer': { path: 'entry.cgi', maxVersion: 3 },
+        'SYNO.AudioStation.Song': { path: 'entry.cgi', maxVersion: 3 },
       } }));
       return;
     }
@@ -24,6 +25,11 @@ test('NAS-local hostname login uses loopback for discovery and authenticated req
     if (auth) authCalls++;
     else assert.equal(params.get('_sid'), 'fixture-session');
     res.setHeader('Content-Type', 'application/json');
+    // Stop the scan before it writes to the account's default catalogue directory.
+    if (params.get('api') === 'SYNO.AudioStation.Song') {
+      res.end(JSON.stringify({ success: false, error: { code: 400 } }));
+      return;
+    }
     if (!auth && invalidApiResponse) { res.end('null'); return; }
     res.end(JSON.stringify({ success: true, data: auth ? { sid: 'fixture-session' } : { players: [] } }));
   });
@@ -34,9 +40,12 @@ test('NAS-local hostname login uses loopback for discovery and authenticated req
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const origin = `http://localhost:${port}`;
+  const env = { ...process.env, PORT: String(port), BIND_ADDRESS: '127.0.0.1', NAS_LOCAL: 'true', PUBLIC_ORIGIN: '' };
+  delete env.HOME;
+  delete env.CATALOGUE_DIR;
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: new URL('.', import.meta.url), stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, PORT: String(port), BIND_ADDRESS: '127.0.0.1', NAS_LOCAL: 'true', PUBLIC_ORIGIN: '' },
+    env,
   });
   let diagnostics = '';
   child.stderr.on('data', chunk => { diagnostics += chunk; });
@@ -59,6 +68,9 @@ test('NAS-local hostname login uses loopback for discovery and authenticated req
   assert.equal(login.data.address, address, 'browser retains its chosen public hostname');
   assert.equal(authCalls, 1);
   assert.equal((await call('players')).status, 200, 'later session requests also use the stable loopback endpoint');
+  const albums = await call('albums', { refresh: true });
+  assert.equal(albums.status, 400, 'without HOME, album loading still reaches Audio Station');
+  assert.match(albums.data.error, /SYNO\.AudioStation\.Song list returned error 400/);
   invalidApiResponse = true;
   const invalid = await call('players');
   assert.equal(invalid.status, 502);
